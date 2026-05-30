@@ -1,6 +1,6 @@
 # 🤖 FunVPN Proxy Robot — GitHub Actions
 
-**Ежедневно собирает публичные прокси и обновляет конфиг**  
+**Собирает готовые VPN-ноды для Happ/v2rayTun и проверенные HTTP-прокси, затем обновляет подписку**
 Разработчики: **FUN RUSSIA CRMP** | **TOO Oink Tech Ltd Co**
 
 ---
@@ -58,41 +58,37 @@ const GITHUB_CONFIGS = [
 
 ---
 
-## 📡 Источники прокси (16 источников)
+## 📡 Источники (VPN + 20+ прокси API/листов)
 
-| Источник | Протоколы |
-|----------|-----------|
-| ProxyScrape API | HTTP, SOCKS4, SOCKS5 |
-| GeoNode Free | HTTP, HTTPS, SOCKS |
-| TheSpeedX/PROXY-List | HTTP, SOCKS4, SOCKS5 |
-| monosans/proxy-list | HTTP, SOCKS5 |
-| jetkai/proxy-list | HTTP, SOCKS5 |
-| hookzof/socks5_list | SOCKS5 |
-| clarketm/proxy-list | HTTP |
-| ShiftyTR/Proxy-List | HTTP |
-| sunny9577/proxy-scraper | HTTP |
-| Spys.me | HTTP |
+| Тип | Источники | Что используется |
+|-----|-----------|------------------|
+| VPN-ноды | ParadoxVPN, V2RayAggregator, v2rayfree, Pawdroid Free-servers | `vless://`, `trojan://`, `ss://`, `vmess://` для Happ/v2rayTun/Hiddify |
+| Прокси API | ProxyScrape, GeoNode, OpenProxySpace, Proxy-List.download | HTTP/HTTPS/SOCKS списки |
+| GitHub-листы | TheSpeedX, monosans, jetkai, hookzof, clarketm, ShiftyTR, sunny9577, roosterkid, KangProxy | 20+ разных HTTP/SOCKS источников |
+| Проверка | `http://httpbin.org/ip` через прокси | В конфиг попадают только реально ответившие HTTP/HTTPS-прокси |
 
 ---
 
 ## 📊 Что делает робот
 
-1. **Загружает** свежие списки из 16 источников
-2. **Дедуплицирует** — убирает повторяющиеся IP:PORT
-3. **Проверяет** каждый прокси (реальное подключение через тест-URL)
-4. **Обогащает** данными о стране через ip-api.com
-5. **Сохраняет** топ-200 самых быстрых в `free_config.txt`
-6. **Коммитит** изменения обратно в репозиторий
+1. **Загружает** готовые VPN-ноды (`vless://`, `trojan://`, `ss://`, `vmess://`) из открытых подписок
+2. **Загружает** HTTP/SOCKS-прокси из 20+ разных API и GitHub-листов
+3. **Дедуплицирует** — убирает повторяющиеся `proto://IP:PORT`
+4. **Проверяет** HTTP/HTTPS-прокси реальным подключением через `httpbin.org/ip`, а не добавляет «от балды»
+5. **Обогащает** HTTP-прокси данными о стране через ip-api.com
+6. **Сохраняет** сначала VPN-ноды для Happ/v2rayTun, ниже — топ-200 самых быстрых HTTP-прокси
+7. **Коммитит** изменения обратно в репозиторий
 
 ---
 
 ## ⚙️ Настройки (scripts/collect_proxies.py)
 
 ```python
-MAX_CONCURRENT_CHECKS = 80    # параллельных проверок
-CHECK_TIMEOUT         = 6     # секунд на один прокси
-MAX_PING_MS           = 5000  # максимальный пинг
-MAX_PROXIES_IN_CONFIG = 200   # лимит в конфиге
+MAX_CONCURRENT_CHECKS   = 80   # параллельных проверок HTTP-прокси
+CHECK_TIMEOUT          = 6    # секунд на один HTTP-прокси
+MAX_PING_MS            = 5000 # максимальный пинг
+MAX_PROXIES_IN_CONFIG  = 200  # лимит HTTP-прокси в конфиге
+MAX_VPN_NODES_IN_CONFIG = 250 # лимит VPN-нод в конфиге
 ```
 
 ---
@@ -101,10 +97,13 @@ MAX_PROXIES_IN_CONFIG = 200   # лимит в конфиге
 
 ```
 === FunVPN Proxy Robot — 2026-05-30 03:01:44 UTC ===
-Собрано:   4821
-Живых:     347
-В конфиге: 200
-Время:     142.3 сек
+VPN-нод:   180
+Прокси собрано:   4821
+HTTP живых:       347
+В конфиге VPN:    180
+В конфиге HTTP:   200
+Источников прокси:32
+Время:            142.3 сек
 FUN RUSSIA CRMP | TOO Oink Tech Ltd Co
 ```
 
