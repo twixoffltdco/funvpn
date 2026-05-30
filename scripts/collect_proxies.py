@@ -16,20 +16,22 @@ import os
 import time
 import base64
 import sys
+import ipaddress
 from datetime import datetime, timezone
 from typing import Dict, List
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 # ──────────────────────────────────────────────
 # НАСТРОЙКИ
 # ──────────────────────────────────────────────
-MAX_CONCURRENT_CHECKS = 80       # параллельных проверок HTTP-прокси
-CHECK_TIMEOUT         = 6        # секунд на один HTTP-прокси
-FETCH_TIMEOUT         = 20       # секунд на загрузку источника
-MAX_PING_MS           = 5000     # максимальный принимаемый пинг
-MAX_PROXIES_IN_CONFIG = 200      # лимит HTTP/SOCKS-прокси в итоговом конфиге
-MAX_VPN_NODES_IN_CONFIG = 250    # лимит VLESS/Trojan/SS/VMess-ноды в конфиге
+MAX_CONCURRENT_CHECKS = 120      # параллельных проверок HTTP-прокси
+CHECK_TIMEOUT         = 8        # секунд на один HTTP-прокси
+FETCH_TIMEOUT         = 25       # секунд на загрузку источника
+MAX_PING_MS           = 3500     # максимальный принимаемый пинг
+MAX_PROXIES_IN_CONFIG = 300      # лимит HTTP/SOCKS-прокси в итоговом конфиге
+MAX_VPN_NODES_IN_CONFIG = 400    # лимит VLESS/Trojan/SS/VMess-ноды в конфиге
 TEST_URL              = "http://httpbin.org/ip"   # что открываем через прокси
+MIN_VPN_NODE_SOURCES  = 20       # страховка: меньше источников не даём роботу запускаться
 
 OUTPUT_CONFIG         = "configs/free_config.txt"
 OUTPUT_JSON           = "configs/proxies.json"
@@ -77,6 +79,86 @@ VPN_NODE_SOURCES = [
     {
         "name": "Pawdroid Free-servers",
         "url": "https://raw.githubusercontent.com/Pawdroid/Free-servers/main/sub",
+        "format": "subscription",
+    },
+    {
+        "name": "Barabama FreeNodes merge",
+        "url": "https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/merged.txt",
+        "format": "subscription",
+    },
+    {
+        "name": "Epodonios v2ray-configs all",
+        "url": "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt",
+        "format": "subscription",
+    },
+    {
+        "name": "mheidari98 aggregated",
+        "url": "https://raw.githubusercontent.com/mheidari98/.proxy/main/all",
+        "format": "subscription",
+    },
+    {
+        "name": "ermaozi get_subscribe main",
+        "url": "https://raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/v2ray.txt",
+        "format": "subscription",
+    },
+    {
+        "name": "anaer/Sub nodes",
+        "url": "https://raw.githubusercontent.com/anaer/Sub/main/clash.yaml",
+        "format": "subscription",
+    },
+    {
+        "name": "peasoft NoMoreWalls",
+        "url": "https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list.txt",
+        "format": "subscription",
+    },
+    {
+        "name": "Leon406 SubCrawler nodes",
+        "url": "https://raw.githubusercontent.com/Leon406/SubCrawler/main/sub/share/all",
+        "format": "subscription",
+    },
+    {
+        "name": "free18 v2ray",
+        "url": "https://raw.githubusercontent.com/free18/v2ray/main/v.txt",
+        "format": "subscription",
+    },
+    {
+        "name": "go4sharing sub",
+        "url": "https://raw.githubusercontent.com/go4sharing/sub/main/sub.yaml",
+        "format": "subscription",
+    },
+    {
+        "name": "surfboardv2ray proxy-list",
+        "url": "https://raw.githubusercontent.com/surfboardv2ray/TGParse/main/configtg.txt",
+        "format": "subscription",
+    },
+    {
+        "name": "pojiezhiyuanjun freev2",
+        "url": "https://raw.githubusercontent.com/pojiezhiyuanjun/freev2/master/0827.txt",
+        "format": "subscription",
+    },
+    {
+        "name": "chengaopan AutoMerge",
+        "url": "https://raw.githubusercontent.com/chengaopan/AutoMergePublicNodes/master/list.txt",
+        "format": "subscription",
+    },
+    {
+        "name": "vxiaov free_proxies",
+        "url": "https://raw.githubusercontent.com/vxiaov/free_proxies/main/clash/clash.provider.yaml",
+        "format": "subscription",
+    },
+    {
+        "name": "YasserDivaR v2ray-configs",
+        "url": "https://raw.githubusercontent.com/YasserDivaR/pr0xy/main/V2Ray.txt",
+        "format": "subscription",
+    },
+    {
+        "name": "ssrsub v2ray",
+        "url": "https://raw.githubusercontent.com/ssrsub/ssr/master/V2Ray",
+        "format": "subscription",
+    },
+    {
+        "name": "freefq free",
+        "url": "https://raw.githubusercontent.com/freefq/free/master/v2",
         "format": "subscription",
     },
 ]
@@ -231,23 +313,158 @@ def maybe_decode_base64_subscription(body: str) -> str:
     return body
 
 
+COUNTRY_NAMES_RU = {
+    "RU": "Россия", "US": "США", "DE": "Германия", "NL": "Нидерланды", "FR": "Франция",
+    "GB": "Британия", "UA": "Украина", "PL": "Польша", "TR": "Турция", "CN": "Китай",
+    "KR": "Корея", "JP": "Япония", "SG": "Сингапур", "IN": "Индия", "BR": "Бразилия",
+    "CA": "Канада", "AU": "Австралия", "IT": "Италия", "ES": "Испания", "FI": "Финляндия",
+    "SE": "Швеция", "NO": "Норвегия", "CH": "Швейцария", "AT": "Австрия", "CZ": "Чехия",
+    "HU": "Венгрия", "RO": "Румыния", "BG": "Болгария", "SK": "Словакия", "LT": "Литва",
+    "LV": "Латвия", "EE": "Эстония", "GR": "Греция", "HR": "Хорватия", "RS": "Сербия",
+    "BA": "Босния", "MD": "Молдова", "AM": "Армения", "GE": "Грузия", "KZ": "Казахстан",
+    "BY": "Беларусь", "AZ": "Азербайджан", "UZ": "Узбекистан", "TH": "Таиланд", "VN": "Вьетнам",
+    "ID": "Индонезия", "MY": "Малайзия", "PH": "Филиппины", "HK": "Гонконг", "TW": "Тайвань",
+    "MX": "Мексика", "AR": "Аргентина", "CL": "Чили", "CO": "Колумбия", "ZA": "ЮАР",
+}
+
+COUNTRY_ALIASES = {
+    "RUSSIA": "RU", "РОССИЯ": "RU", "RU": "RU",
+    "USA": "US", "UNITED STATES": "US", "AMERICA": "US", "США": "US", "US": "US",
+    "GERMANY": "DE", "DEUTSCHLAND": "DE", "ГЕРМАНИЯ": "DE", "DE": "DE",
+    "NETHERLANDS": "NL", "HOLLAND": "NL", "НИДЕРЛАНДЫ": "NL", "NL": "NL",
+    "FRANCE": "FR", "ФРАНЦИЯ": "FR", "FR": "FR",
+    "UNITED KINGDOM": "GB", "UK": "GB", "BRITAIN": "GB", "БРИТАНИЯ": "GB", "АНГЛИЯ": "GB", "GB": "GB",
+    "UKRAINE": "UA", "УКРАИНА": "UA", "UA": "UA",
+    "POLAND": "PL", "ПОЛЬША": "PL", "PL": "PL",
+    "TURKEY": "TR", "ТУРЦИЯ": "TR", "TR": "TR",
+    "CHINA": "CN", "КИТАЙ": "CN", "CN": "CN",
+    "KOREA": "KR", "КОРЕЯ": "KR", "KR": "KR",
+    "JAPAN": "JP", "ЯПОНИЯ": "JP", "JP": "JP",
+    "SINGAPORE": "SG", "СИНГАПУР": "SG", "SG": "SG",
+    "CANADA": "CA", "КАНАДА": "CA", "CA": "CA",
+}
+
+FLAG_TO_COUNTRY = {flag: code for code, flag in COUNTRY_EMOJI.items()}
+
+
+def unquote_deep(value: str, max_rounds: int = 4) -> str:
+    previous = value
+    for _ in range(max_rounds):
+        current = unquote(previous)
+        if current == previous:
+            break
+        previous = current
+    return previous
+
+
+def normalize_label_text(value: str) -> str:
+    label = unquote_deep(value or "")
+    label = re.sub(r"(?i)(funvpn|fun vpn|happ|v2raytun|android|iphone|windows|pc|пк|телефон)", " ", label)
+    label = re.sub(r"[|_/\\]+", " ", label)
+    label = re.sub(r"\s+", " ", label).strip(" -•—:[]()")
+    return label
+
+
+def infer_country_code(label: str) -> str:
+    clean = normalize_label_text(label).upper()
+    for flag, code in FLAG_TO_COUNTRY.items():
+        if flag in label:
+            return code
+    for alias, code in COUNTRY_ALIASES.items():
+        if re.search(rf"(?<![A-ZА-Я]){re.escape(alias)}(?![A-ZА-Я])", clean):
+            return code
+    return ""
+
+
+def extract_ping(label: str) -> str:
+    clean = unquote_deep(label)
+    match = re.search(r"(\d{1,4})\s*ms", clean, flags=re.I)
+    return f"{match.group(1)}ms" if match else ""
+
+
+def make_vpn_label(original_label: str, index: int) -> str:
+    country = infer_country_code(original_label)
+    flag = COUNTRY_EMOJI.get(country, "🌐")
+    country_name = COUNTRY_NAMES_RU.get(country, "Auto")
+    ping = extract_ping(original_label)
+    suffix = f" ({ping})" if ping else ""
+    return f"{flag} {country_name} {index:03d}{suffix}"
+
+
+def decode_vmess_payload(payload: str) -> dict | None:
+    compact = payload.strip()
+    if not compact:
+        return None
+    padded = compact + "=" * (-len(compact) % 4)
+    for decoder in (base64.urlsafe_b64decode, base64.b64decode):
+        try:
+            raw = decoder(padded).decode("utf-8", errors="ignore")
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else None
+        except Exception:
+            pass
+    return None
+
+
+def encode_vmess_payload(data: dict) -> str:
+    raw = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return base64.b64encode(raw).decode("ascii")
+
+
+def is_public_host(host: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(host.strip("[]"))
+        return ip.is_global
+    except ValueError:
+        return True
+
 def clean_node_uri(uri: str) -> str | None:
-    uri = uri.strip().strip('"\'`,;')
+    uri = uri.strip().strip('"\'`,;]} )' )
     if not uri.lower().startswith(SUPPORTED_NODE_SCHEMES):
         return None
     scheme = uri.split(":", 1)[0].lower()
     if scheme == "vmess":
-        # vmess:// обычно целиком base64; не ломаем его urlsplit-ом.
-        return uri
+        payload = uri.split("://", 1)[1]
+        return uri if decode_vmess_payload(payload) else None
     try:
         parts = urlsplit(uri)
     except ValueError:
         return None
-    if not parts.scheme or not parts.netloc:
+    if not parts.scheme or not parts.netloc or not is_public_host(parts.hostname or ""):
         return None
-    fragment = quote(parts.fragment, safe="") if parts.fragment else ""
+    fragment = quote(normalize_label_text(parts.fragment), safe="") if parts.fragment else ""
     return urlunsplit((parts.scheme.lower(), parts.netloc, parts.path, parts.query, fragment))
 
+
+def relabel_node_uri(uri: str, index: int) -> str | None:
+    scheme = uri.split(":", 1)[0].lower()
+    if scheme == "vmess":
+        payload = uri.split("://", 1)[1]
+        data = decode_vmess_payload(payload)
+        if not data:
+            return None
+        data["ps"] = make_vpn_label(str(data.get("ps", "")), index)
+        return f"vmess://{encode_vmess_payload(data)}"
+
+    try:
+        parts = urlsplit(uri)
+    except ValueError:
+        return None
+    if not parts.scheme or not parts.netloc or not is_public_host(parts.hostname or ""):
+        return None
+    label = quote(make_vpn_label(parts.fragment, index), safe="")
+    return urlunsplit((parts.scheme.lower(), parts.netloc, parts.path, parts.query, label))
+
+
+def relabel_vpn_nodes(nodes: List[str]) -> List[str]:
+    relabeled = []
+    seen = set()
+    for node in nodes:
+        new_node = relabel_node_uri(node, len(relabeled) + 1)
+        if new_node and new_node not in seen:
+            seen.add(new_node)
+            relabeled.append(new_node)
+    return relabeled
 
 def parse_subscription_nodes(body: str) -> List[str]:
     decoded = maybe_decode_base64_subscription(body)
@@ -371,6 +588,9 @@ async def check_proxy(semaphore: asyncio.Semaphore,
                 allow_redirects=True,
             ) as resp:
                 if resp.status == 200:
+                    body = await resp.text(errors="ignore")
+                    if "origin" not in body and ip not in body:
+                        return None
                     ping = int((time.monotonic() - t0) * 1000)
                     if ping <= MAX_PING_MS:
                         return {**proxy, "proto": proto, "ping": ping}
@@ -453,7 +673,7 @@ def build_config(proxies: List[Dict], vpn_nodes: List[str] | None = None,
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = [
         "#profile-title: 🎮 FunVPN",
-        "#profile-update-interval: 3",
+        "#profile-update-interval: 1",
         "#subscription-userinfo: upload=0; download=0; total=0; expire=0",
         "#support-url: https://github.com/FunVPN",
         f"#announce: FunVPN — обновлено {now}. Сначала идут VLESS/Trojan/SS ноды для Happ, ниже проверенные HTTP-прокси.",
@@ -471,14 +691,15 @@ def build_config(proxies: List[Dict], vpn_nodes: List[str] | None = None,
     proxy_count = 0
     if proxies:
         lines.append("# === Проверенные HTTP-прокси ===")
-    for p in proxies[:top_n]:
+    for idx, p in enumerate(proxies[:top_n], start=1):
         ip = p["ip"]
         port = p["port"]
         proto = "http" if p.get("proto", "http") == "https" else p.get("proto", "http")
         ping = p.get("ping", 0)
         country = p.get("country", "")
         flag = COUNTRY_EMOJI.get(country, "🌐")
-        label = quote(f"{flag} FunVPN-HTTP-{country or 'XX'} ({ping}ms)", safe="")
+        country_name = COUNTRY_NAMES_RU.get(country, country or "Auto")
+        label = quote(f"{flag} HTTP {country_name} {idx:03d} ({ping}ms)", safe="")
         lines.append(f"{proto}://{ip}:{port}#{label}")
         proxy_count += 1
 
@@ -533,6 +754,9 @@ async def main():
     print("🤖  FunVPN Proxy/VPN Robot")
     print("    FUN RUSSIA CRMP | TOO Oink Tech Ltd Co")
     print("=" * 55)
+
+    if len(VPN_NODE_SOURCES) < MIN_VPN_NODE_SOURCES:
+        raise RuntimeError(f"VPN-источников должно быть минимум {MIN_VPN_NODE_SOURCES}, сейчас {len(VPN_NODE_SOURCES)}")
 
     # 1. Собрать реальные VPN-ноды для Happ/v2rayTun.
     vpn_nodes = await collect_vpn_nodes()
