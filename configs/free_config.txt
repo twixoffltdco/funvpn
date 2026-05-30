@@ -1,7 +1,7 @@
-#profile-title: 🔥 ParadoxVPN
+#profile-title: 🔥 FUNVPN
 #profile-update-interval: 1
 #subscription-userinfo: upload=0; download=0; total=0; expire=0
-#support-url: https://t.me/Parad1stik
+#support-url: https://t.me/oinktech
 #announce: Внимание! Это бесплатный VPN! Из-за большого наплыва пользователей сервера могут работать не стабильно. Для хорошей работы купите подписку.
 
 vless://00000000-0000-0000-0000-000000000000@192.168.0.1:1?security=none&encryption=none&type=tcp#%F0%9F%94%BD%20%D0%9E%D0%B1%D1%8B%D1%87%D0%BD%D1%8B%D0%B9%20VPN
