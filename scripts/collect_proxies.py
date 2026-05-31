@@ -170,6 +170,43 @@ VPN_NODE_SOURCES = [
 # ИСТОЧНИКИ ПУБЛИЧНЫХ HTTP/SOCKS-ПРОКСИ (20+ разных API/листов)
 # ──────────────────────────────────────────────
 SOURCES = [
+    # ★ Самые надёжные — проверяют сами каждые 15-30 мин
+    {"name": "barry-far ALL",          "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt",          "format": "v2ray", "proto": "v2ray"},
+    {"name": "barry-far vless",        "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/vless.txt", "format": "v2ray", "proto": "v2ray"},
+    {"name": "barry-far vmess",        "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/vmess.txt", "format": "v2ray", "proto": "v2ray"},
+    {"name": "barry-far trojan",       "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/trojan.txt", "format": "v2ray", "proto": "v2ray"},
+    {"name": "barry-far ss",           "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/ss.txt",   "format": "v2ray", "proto": "v2ray"},
+
+    # ★ MatinGhanbari — обновляется каждые 15 мин
+    {"name": "MatinGhanbari super",    "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/super-sub.txt", "format": "v2ray", "proto": "v2ray"},
+    {"name": "MatinGhanbari vless",    "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/filtered/subs/vless.txt", "format": "v2ray", "proto": "v2ray"},
+    {"name": "MatinGhanbari vmess",    "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/filtered/subs/vmess.txt", "format": "v2ray", "proto": "v2ray"},
+    {"name": "MatinGhanbari trojan",   "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/filtered/subs/trojan.txt", "format": "v2ray", "proto": "v2ray"},
+
+    # ★ Epodonios — большой агрегатор
+    {"name": "Epodonios ALL",          "url": "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt", "format": "v2ray", "proto": "v2ray"},
+
+    # ★ igareck — проверяет в РФ каждые 1-2 часа
+    {"name": "igareck vless-reality",  "url": "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt", "format": "v2ray", "proto": "v2ray"},
+    {"name": "igareck general",        "url": "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/General-Sub.txt", "format": "v2ray", "proto": "v2ray"},
+
+    # Хорошие агрегаторы
+    {"name": "mahdibland merged",      "url": "https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge.txt", "format": "v2ray", "proto": "v2ray"},
+    {"name": "Leon406 all",            "url": "https://raw.githubusercontent.com/Leon406/SubCrawler/main/sub/share/all", "format": "v2ray", "proto": "v2ray"},
+    {"name": "peasoft NoMoreWalls",    "url": "https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list.txt", "format": "v2ray", "proto": "v2ray"},
+    {"name": "aiboboxx v2rayfree",     "url": "https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2", "format": "v2ray", "proto": "v2ray"},
+    {"name": "Pawdroid sub",           "url": "https://raw.githubusercontent.com/Pawdroid/Free-servers/main/sub", "format": "v2ray", "proto": "v2ray"},
+    {"name": "freefq free",            "url": "https://raw.githubusercontent.com/freefq/free/master/v2", "format": "v2ray", "proto": "v2ray"},
+    {"name": "ermaozi v2ray",          "url": "https://raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/v2ray.txt", "format": "v2ray", "proto": "v2ray"},
+    {"name": "mheidari all",           "url": "https://raw.githubusercontent.com/mheidari98/.proxy/main/all", "format": "v2ray", "proto": "v2ray"},
+    {"name": "chengaopan merged",      "url": "https://raw.githubusercontent.com/chengaopan/AutoMergePublicNodes/master/list.txt", "format": "v2ray", "proto": "v2ray"},
+    {"name": "ssrsub V2Ray",           "url": "https://raw.githubusercontent.com/ssrsub/ssr/master/V2Ray", "format": "v2ray", "proto": "v2ray"},
+    {"name": "Barabama merged",        "url": "https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/merged.txt", "format": "v2ray", "proto": "v2ray"},
+    {"name": "free18 v2ray",           "url": "https://raw.githubusercontent.com/free18/v2ray/main/v.txt", "format": "v2ray", "proto": "v2ray"},
+    {"name": "YasserDivaR pr0xy",      "url": "https://raw.githubusercontent.com/YasserDivaR/pr0xy/main/V2Ray.txt", "format": "v2ray", "proto": "v2ray"},
+    {"name": "surfboardv2ray tgparse", "url": "https://raw.githubusercontent.com/surfboardv2ray/TGParse/main/configtg.txt", "format": "v2ray", "proto": "v2ray"},
+
+    # Ниже — «старые» источники (прокси-списки) в исходном формате
     {"name": "ProxyScrape HTTP", "url": "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=http&timeout=5000&country=all&ssl=all&anonymity=all", "format": "text", "proto": "http"},
     {"name": "ProxyScrape HTTPS", "url": "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=https&timeout=5000&country=all&ssl=all&anonymity=all", "format": "text", "proto": "https"},
     {"name": "ProxyScrape SOCKS5", "url": "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=socks5&timeout=5000", "format": "text", "proto": "socks5"},
