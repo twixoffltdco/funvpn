@@ -15,6 +15,7 @@ import re
 import os
 import time
 import base64
+import random
 import sys
 import ipaddress
 from datetime import datetime, timezone
@@ -25,7 +26,9 @@ from urllib.parse import quote, unquote, urlsplit, urlunsplit
 # НАСТРОЙКИ
 # ──────────────────────────────────────────────
 MAX_CONCURRENT_CHECKS = 120      # параллельных проверок HTTP-прокси
+VPN_CONCURRENT_CHECKS = 180      # параллельных TCP-проверок VPN-нод
 CHECK_TIMEOUT         = 8        # секунд на один HTTP-прокси
+VPN_CHECK_TIMEOUT     = 4        # секунд на TCP-проверку VPN-ноды
 FETCH_TIMEOUT         = 25       # секунд на загрузку источника
 MAX_PING_MS           = 3500     # максимальный принимаемый пинг
 MAX_PROXIES_IN_CONFIG = 300      # лимит HTTP/SOCKS-прокси в итоговом конфиге
@@ -361,7 +364,7 @@ def normalize_label_text(value: str) -> str:
     label = unquote_deep(value or "")
     label = re.sub(r"(?i)(funvpn|fun vpn|happ|v2raytun|android|iphone|windows|pc|пк|телефон)", " ", label)
     label = re.sub(r"[|_/\\]+", " ", label)
-    label = re.sub(r"\s+", " ", label).strip(" -•—:[]()")
+    label = re.sub(r"\s+", " ", label).strip(" -•—:[]")
     return label
 
 
@@ -382,13 +385,32 @@ def extract_ping(label: str) -> str:
     return f"{match.group(1)}ms" if match else ""
 
 
-def make_vpn_label(original_label: str, index: int) -> str:
+def make_vpn_label(original_label: str, index: int, ping_ms: int | None = None) -> str:
     country = infer_country_code(original_label)
     flag = COUNTRY_EMOJI.get(country, "🌐")
     country_name = COUNTRY_NAMES_RU.get(country, "Auto")
-    ping = extract_ping(original_label)
+    ping = f"{ping_ms}ms" if ping_ms is not None else extract_ping(original_label)
     suffix = f" ({ping})" if ping else ""
     return f"{flag} {country_name} {index:03d}{suffix}"
+
+
+def set_node_label(uri: str, label: str) -> str | None:
+    scheme = uri.split(":", 1)[0].lower()
+    if scheme == "vmess":
+        payload = uri.split("://", 1)[1]
+        data = decode_vmess_payload(payload)
+        if not data:
+            return None
+        data["ps"] = label
+        return f"vmess://{encode_vmess_payload(data)}"
+
+    try:
+        parts = urlsplit(uri)
+    except ValueError:
+        return None
+    if not parts.scheme or not parts.netloc or not is_public_host(parts.hostname or ""):
+        return None
+    return urlunsplit((parts.scheme.lower(), parts.netloc, parts.path, parts.query, quote(label, safe="")))
 
 
 def decode_vmess_payload(payload: str) -> dict | None:
@@ -419,7 +441,7 @@ def is_public_host(host: str) -> bool:
         return True
 
 def clean_node_uri(uri: str) -> str | None:
-    uri = uri.strip().strip('"\'`,;]} )' )
+    uri = uri.strip().strip('"\'`,;]}')
     if not uri.lower().startswith(SUPPORTED_NODE_SCHEMES):
         return None
     scheme = uri.split(":", 1)[0].lower()
@@ -436,14 +458,15 @@ def clean_node_uri(uri: str) -> str | None:
     return urlunsplit((parts.scheme.lower(), parts.netloc, parts.path, parts.query, fragment))
 
 
-def relabel_node_uri(uri: str, index: int) -> str | None:
+def relabel_node_uri(uri: str, index: int, ping_ms: int | None = None) -> str | None:
     scheme = uri.split(":", 1)[0].lower()
     if scheme == "vmess":
         payload = uri.split("://", 1)[1]
         data = decode_vmess_payload(payload)
         if not data:
             return None
-        data["ps"] = make_vpn_label(str(data.get("ps", "")), index)
+        label = make_vpn_label(str(data.get("ps", "")), index, ping_ms)
+        data["ps"] = label
         return f"vmess://{encode_vmess_payload(data)}"
 
     try:
@@ -452,19 +475,33 @@ def relabel_node_uri(uri: str, index: int) -> str | None:
         return None
     if not parts.scheme or not parts.netloc or not is_public_host(parts.hostname or ""):
         return None
-    label = quote(make_vpn_label(parts.fragment, index), safe="")
-    return urlunsplit((parts.scheme.lower(), parts.netloc, parts.path, parts.query, label))
+    return set_node_label(uri, make_vpn_label(parts.fragment, index, ping_ms))
 
 
-def relabel_vpn_nodes(nodes: List[str]) -> List[str]:
+def relabel_vpn_nodes(nodes: List[str | Dict]) -> List[str]:
     relabeled = []
     seen = set()
-    for node in nodes:
-        new_node = relabel_node_uri(node, len(relabeled) + 1)
+    for item in nodes:
+        if isinstance(item, dict):
+            node = str(item.get("uri", ""))
+            ping_ms = item.get("ping")
+        else:
+            node = str(item)
+            ping_ms = None
+        new_node = relabel_node_uri(node, len(relabeled) + 1, ping_ms)
         if new_node and new_node not in seen:
             seen.add(new_node)
             relabeled.append(new_node)
     return relabeled
+
+
+def make_universal_node(vpn_nodes: List[str]) -> str | None:
+    if not vpn_nodes:
+        return None
+    source_node = random.SystemRandom().choice(vpn_nodes[:min(len(vpn_nodes), 25)])
+    ping = extract_ping(unquote_deep(urlsplit(source_node).fragment))
+    suffix = f" ({ping})" if ping else ""
+    return set_node_label(source_node, f"🌐 Универсальный (авто выбор){suffix}")
 
 def parse_subscription_nodes(body: str) -> List[str]:
     decoded = maybe_decode_base64_subscription(body)
@@ -484,6 +521,45 @@ def parse_subscription_nodes(body: str) -> List[str]:
             seen.add(node)
             nodes.append(node)
     return nodes
+
+
+def parse_node_endpoint(uri: str) -> tuple[str, int] | None:
+    scheme = uri.split(":", 1)[0].lower()
+    if scheme == "vmess":
+        payload = uri.split("://", 1)[1]
+        data = decode_vmess_payload(payload)
+        if not data:
+            return None
+        host = str(data.get("add", "")).strip()
+        try:
+            port = int(data.get("port", 0))
+        except (TypeError, ValueError):
+            return None
+        return (host, port) if host and 1 <= port <= 65535 and is_public_host(host) else None
+
+    try:
+        parts = urlsplit(uri)
+        host = parts.hostname
+        port = parts.port
+    except ValueError:
+        return None
+
+    if host and port and 1 <= port <= 65535 and is_public_host(host):
+        return host, port
+
+    # Некоторые ss:// источники кодируют method:password@host:port целиком в base64.
+    if scheme == "ss":
+        compact = uri.split("://", 1)[1].split("#", 1)[0].split("?", 1)[0]
+        try:
+            decoded = base64.urlsafe_b64decode(compact + "=" * (-len(compact) % 4)).decode("utf-8", errors="ignore")
+            if "@" in decoded and ":" in decoded.rsplit("@", 1)[1]:
+                host_text, port_text = decoded.rsplit("@", 1)[1].rsplit(":", 1)
+                port_num = int(port_text)
+                if host_text and 1 <= port_num <= 65535 and is_public_host(host_text):
+                    return host_text, port_num
+        except Exception:
+            pass
+    return None
 
 
 # ──────────────────────────────────────────────
@@ -540,6 +616,53 @@ async def collect_vpn_nodes() -> List[str]:
 
     print(f"\n✅ Собрано уникальных VPN-нод: {len(nodes)}")
     return nodes
+
+
+async def check_vpn_node(semaphore: asyncio.Semaphore, node: str) -> Dict | None:
+    endpoint = parse_node_endpoint(node)
+    if not endpoint:
+        return None
+    host, port = endpoint
+
+    async with semaphore:
+        t0 = time.monotonic()
+        try:
+            connect_task = asyncio.open_connection(host, port)
+            reader, writer = await asyncio.wait_for(connect_task, timeout=VPN_CHECK_TIMEOUT)
+            ping = int((time.monotonic() - t0) * 1000)
+            writer.close()
+            await writer.wait_closed()
+            if ping <= MAX_PING_MS:
+                return {"uri": node, "host": host, "port": port, "ping": ping}
+        except Exception:
+            return None
+    return None
+
+
+async def check_all_vpn_nodes(nodes: List[str]) -> List[Dict]:
+    print(
+        f"\n🔌 Проверяем {len(nodes)} VPN-нод реальным TCP-connect "
+        f"(параллельно {VPN_CONCURRENT_CHECKS})..."
+    )
+    if not nodes:
+        return []
+
+    semaphore = asyncio.Semaphore(VPN_CONCURRENT_CHECKS)
+    tasks = [check_vpn_node(semaphore, node) for node in nodes]
+    alive = []
+    done = 0
+    for coro in asyncio.as_completed(tasks):
+        result = await coro
+        done += 1
+        if result:
+            alive.append(result)
+        if done % 500 == 0 or done == len(tasks):
+            pct = done * 100 // len(tasks)
+            print(f"  [{pct:3d}%] TCP проверено {done}/{len(tasks)}, живых VPN: {len(alive)}")
+
+    alive.sort(key=lambda x: x["ping"])
+    print(f"\n🟢 Живых TCP-доступных VPN-нод: {len(alive)}")
+    return alive
 
 
 async def collect_all() -> List[Dict]:
@@ -683,6 +806,9 @@ def build_config(proxies: List[Dict], vpn_nodes: List[str] | None = None,
     node_count = 0
     if vpn_nodes:
         lines.append("# === VPN-ноды для Happ / v2rayTun / Hiddify ===")
+        universal_node = make_universal_node(vpn_nodes)
+        if universal_node:
+            lines.append(universal_node)
         for node in vpn_nodes[:MAX_VPN_NODES_IN_CONFIG]:
             lines.append(node)
             node_count += 1
@@ -715,8 +841,10 @@ def build_config(proxies: List[Dict], vpn_nodes: List[str] | None = None,
 def build_json_report(proxies: List[Dict], vpn_nodes: List[str] | None = None) -> str:
     now = datetime.now(timezone.utc).isoformat()
     vpn_nodes = vpn_nodes or []
+    universal_node = make_universal_node(vpn_nodes)
     return json.dumps({
         "updated_at": now,
+        "universal_node": universal_node,
         "vpn_nodes_total": len(vpn_nodes),
         "vpn_nodes_in_config": min(len(vpn_nodes), MAX_VPN_NODES_IN_CONFIG),
         "http_proxies_total": len(proxies),
@@ -758,8 +886,10 @@ async def main():
     if len(VPN_NODE_SOURCES) < MIN_VPN_NODE_SOURCES:
         raise RuntimeError(f"VPN-источников должно быть минимум {MIN_VPN_NODE_SOURCES}, сейчас {len(VPN_NODE_SOURCES)}")
 
-    # 1. Собрать реальные VPN-ноды для Happ/v2rayTun.
-    vpn_nodes = await collect_vpn_nodes()
+    # 1. Собрать реальные VPN-ноды для Happ/v2rayTun и отфильтровать только TCP-доступные.
+    raw_vpn_nodes = await collect_vpn_nodes()
+    alive_vpn_nodes = await check_all_vpn_nodes(raw_vpn_nodes)
+    vpn_nodes = relabel_vpn_nodes(alive_vpn_nodes)
 
     # 2. Собрать HTTP/SOCKS-прокси из 20+ источников.
     raw = await collect_all()
@@ -768,7 +898,7 @@ async def main():
     alive = await check_all(raw)
 
     if not vpn_nodes and not alive:
-        print("\n⚠️  Не найдено ни VPN-нод, ни живых HTTP-прокси. Конфиг не обновляется.")
+        print("\n⚠️  Не найдено ни TCP-доступных VPN-нод, ни живых HTTP-прокси. Конфиг не обновляется.")
         sys.exit(1)
 
     # 4. Страны для HTTP-прокси.
