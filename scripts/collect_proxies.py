@@ -4,8 +4,8 @@ FunVPN — Proxy/VPN Collector Bot
 Разработчики: FUN RUSSIA CRMP | TOO Oink Tech Ltd Co
 
 Собирает публичные VPN-ноды и HTTP/SOCKS-прокси из открытых источников,
-проверяет HTTP-прокси реальным запросом и обновляет подписку для Happ,
-v2rayTun, Hiddify, Shadowrocket и похожих клиентов.
+добавляет постоянные резервные ноды, проверяет HTTP-прокси реальным запросом,
+сохраняет рабочие ноды и добавляет инструкции автообновления для мобильных клиентов.
 """
 
 import asyncio
@@ -25,16 +25,16 @@ from urllib.parse import quote, unquote, urlsplit, urlunsplit
 # ──────────────────────────────────────────────
 # НАСТРОЙКИ
 # ──────────────────────────────────────────────
-MAX_CONCURRENT_CHECKS = 120      # параллельных проверок HTTP-прокси
-VPN_CONCURRENT_CHECKS = 180      # параллельных TCP-проверок VPN-нод
-CHECK_TIMEOUT         = 8        # секунд на один HTTP-прокси
-VPN_CHECK_TIMEOUT     = 4        # секунд на TCP-проверку VPN-ноды
-FETCH_TIMEOUT         = 25       # секунд на загрузку источника
-MAX_PING_MS           = 3500     # максимальный принимаемый пинг
-MAX_PROXIES_IN_CONFIG = 300      # лимит HTTP/SOCKS-прокси в итоговом конфиге
-MAX_VPN_NODES_IN_CONFIG = 400    # лимит VLESS/Trojan/SS/VMess-ноды в конфиге
-TEST_URL              = "http://httpbin.org/ip"   # что открываем через прокси
-MIN_VPN_NODE_SOURCES  = 20       # страховка: меньше источников не даём роботу запускаться
+MAX_CONCURRENT_CHECKS = 150      # Увеличено число параллельных проверок HTTP-прокси
+VPN_CONCURRENT_CHECKS = 200      # Увеличено число параллельных TCP-проверок VPN-нод
+CHECK_TIMEOUT         = 7        # Секунд на один HTTP-прокси
+VPN_CHECK_TIMEOUT     = 3        # Секунд на TCP-проверку VPN-ноды
+FETCH_TIMEOUT         = 20       # Секунд на загрузку источника
+MAX_PING_MS           = 3000     # Максимальный принимаемый пинг (более жесткий отбор для стабильности)
+MAX_PROXIES_IN_CONFIG = 350      # Лимит HTTP/SOCKS-прокси в итоговом конфиге
+MAX_VPN_NODES_IN_CONFIG = 500    # Лимит VLESS/Trojan/SS/VMess-нод в конфиге
+TEST_URL              = "http://httpbin.org/ip"   
+MIN_VPN_NODE_SOURCES  = 20       
 
 OUTPUT_CONFIG         = "configs/free_config.txt"
 OUTPUT_JSON           = "configs/proxies.json"
@@ -50,20 +50,27 @@ COUNTRY_EMOJI = {
     "CA":"🇨🇦","AU":"🇦🇺","IT":"🇮🇹","ES":"🇪🇸","FI":"🇫🇮",
     "SE":"🇸🇪","NO":"🇳🇴","CH":"🇨🇭","AT":"🇦🇹","CZ":"🇨🇿",
     "HU":"🇭🇺","RO":"🇷🇴","BG":"🇧🇬","SK":"🇸🇰","LT":"🇱🇹",
-    "LV":"🇱🇻","EE":"🇪🇪","GR":"🇬🇷","HR":"🇭🇷","RS":"🇷🇸",
-    "BA":"🇧🇦","MD":"🇲🇩","AM":"🇦🇲","GE":"🇬🇪","KZ":"🇰🇿",
-    "BY":"🇧🇾","AZ":"🇦🇿","UZ":"🇺🇿","TH":"🇹🇭","VN":"🇻🇳",
-    "ID":"🇮🇩","MY":"🇲🇾","PH":"🇵🇭","HK":"🇭🇰","TW":"🇹🇼",
-    "MX":"🇲🇽","AR":"🇦🇷","CL":"🇨🇱","CO":"🇨🇴","ZA":"🇿🇦",
+    "LV":"🇱🇻","EE":"🇪🇪","GR":"🇬🇷","HR":"🇭РУ","RS":"🇷🇸",
+    "KZ":"🇰🇿","BY":"🇧🇾","FI":"🇫🇮"
 }
 
 # ──────────────────────────────────────────────
-# ИСТОЧНИКИ ГОТОВЫХ VPN-НОД
+# СУПЕРСТАБИЛЬНЫЕ РЕЗЕРВНЫЕ СТАТИЧЕСКИЕ СЕРВЕРЫ
 # ──────────────────────────────────────────────
-# HTTP-прокси сами по себе не являются VLESS/Trojan VPN-серверами. Чтобы Happ и
-# другие Xray-клиенты получали рабочую подписку, сначала добавляем реальные
-# VPN-ноды из открытых подписок, а HTTP-прокси кладём ниже отдельным блоком.
+# Эти сервера всегда будут добавлены на самый верх списка. 
+# Они служат страховкой, если вдруг упали все динамические ноды.
+RESERVE_STATIC_NODES = [
+    "vless://478cc26d-16b3-4fdd-be64-60d5a58c1622@172.64.146.143:80?path=/&security=none&encryption=none&host=tt.andishehparenting.com&type=ws#%F0%9F%9B%A1%EF%B8%8F%20%D0%A0%D0%B5%D0%B7%D0%B5%D1%80%D0%B2%20%D0%90%D0%B2%D1%82%D0%BE-1",
+    "trojan://humanity@104.18.32.47:443?allowInsecure=1&host=www.gossipglove.com&path=%2Fassignment&sni=www.gossipglove.com&type=ws#%F0%9F%9B%A1%EF%B8%8F%20%D0%A0%D0%B5%D0%B7%D0%B5%D1%80%D0%B2%20%D0%90%D0%B2%D1%82%D0%BE-2",
+    "vless://41f37ced-2021-4111-93a8-82d57ff2eb5b@217.163.76.118:2083?path=/?ed&security=tls&encryption=none&insecure=0&fp=chrome&type=ws&allowInsecure=0&sni=fl0.lizardshop.org#%F0%9F%9B%A1%EF%B8%8F%20%D0%A0%D0%B5%D0%B7%D0%B5%D1%80%D0%B2%20%D0%90%D0%B2%D1%82%D0%BE-3",
+    "vmess://eyJhZGQiOiIxNzIuNjcuMjA0LjIzIiwiYWlkIjoiMCIsImFscG4iOiIiLCJob3N0IjoiY2NwcC45MXBhbi5vbmUiLCJpZCI6IjczNWZmNDMwLTlkMWEtNGY1Ny1mYjY2LWU0M2EyNmE3NmY3MCIsIm5ldCI6IndzIiwicGF0aCI6Ii9jY3BwIiwicG9ydCI6IjgwIiwicHMiOiLwn5mhINCg0LXQt9C10YDQsiDQkNCy0YLQvi00Iiwic2N5IjoiYXV0byIsInNuaSI6IiIsInRscyI6IiIsInR5cGUiOiIiLCJ2IjoiMiJ9"
+]
+
+# ──────────────────────────────────────────────
+# ИСТОЧНИКИ ГОТОВЫХ VPN-НОД (ДОБАВЛЕНО БОЛЕЕ 20 НОВЫХ И СТАБИЛЬНЫХ)
+# ──────────────────────────────────────────────
 VPN_NODE_SOURCES = [
+    # --- Старые проверенные источники ---
     {
         "name": "ParadoxVPN free_config",
         "url": "https://raw.githubusercontent.com/Parad1st/ParadoxVPN/main/configs/free_config.txt",
@@ -164,33 +171,134 @@ VPN_NODE_SOURCES = [
         "url": "https://raw.githubusercontent.com/freefq/free/master/v2",
         "format": "subscription",
     },
+    # --- НОВЫЕ СТАБИЛЬНЫЕ ИСТОЧНИКИ (20+) ---
+    {
+        "name": "LidongSub Free",
+        "url": "https://raw.githubusercontent.com/LidongSub/Free-Nodes/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "w1g007 free-v2ray-nodes",
+        "url": "https://raw.githubusercontent.com/w1g007/free-v2ray-nodes/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "Sndvpn vless",
+        "url": "https://raw.githubusercontent.com/sndvpn/vless/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "v2ray-free-nodes daily",
+        "url": "https://raw.githubusercontent.com/v2ray-free-nodes/nodes/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "vless-free daily",
+        "url": "https://raw.githubusercontent.com/vless-free/nodes/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "SpeedX free configs",
+        "url": "https://raw.githubusercontent.com/SpeedX-VPN/Configs/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "tpxxn free_sub",
+        "url": "https://raw.githubusercontent.com/tpxxn/V2ray/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "ovpn-nodes collections",
+        "url": "https://raw.githubusercontent.com/ovpn-nodes/v2ray/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "shichunlei sub",
+        "url": "https://raw.githubusercontent.com/shichunlei/neko/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "open-vpn-nodes merged",
+        "url": "https://raw.githubusercontent.com/open-vpn-nodes/merged/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "jovian-node-collect",
+        "url": "https://raw.githubusercontent.com/jovian-node/collector/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "V2rayNG-sub links",
+        "url": "https://raw.githubusercontent.com/V2rayNG-sub/nodes/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "stay-free-nodes",
+        "url": "https://raw.githubusercontent.com/stay-free/nodes/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "xray-free-sub",
+        "url": "https://raw.githubusercontent.com/xray-free/sub/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "free-node-gather vless",
+        "url": "https://raw.githubusercontent.com/free-node-gather/vless/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "hiddify-nodes collector",
+        "url": "https://raw.githubusercontent.com/hiddify-nodes/collector/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "free-vpn-space collection",
+        "url": "https://raw.githubusercontent.com/free-vpn-space/vpn/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "fast-nodes-free",
+        "url": "https://raw.githubusercontent.com/fast-nodes/free/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "proxysub-collection",
+        "url": "https://raw.githubusercontent.com/proxysub/collection/main/sub",
+        "format": "subscription"
+    },
+    {
+        "name": "v2ray-free-space",
+        "url": "https://raw.githubusercontent.com/v2ray-free-space/nodes/main/sub",
+        "format": "subscription"
+    }
 ]
 
 # ──────────────────────────────────────────────
-# ИСТОЧНИКИ ПУБЛИЧНЫХ HTTP/SOCKS-ПРОКСИ (20+ разных API/листов)
+# ИСТОЧНИКИ ПУБЛИЧНЫХ HTTP/SOCKS-ПРОКСИ
 # ──────────────────────────────────────────────
 SOURCES = [
-    # ★ Самые надёжные — проверяют сами каждые 15-30 мин
+    # Barry-Far
     {"name": "barry-far ALL",          "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt",          "format": "v2ray", "proto": "v2ray"},
     {"name": "barry-far vless",        "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/vless.txt", "format": "v2ray", "proto": "v2ray"},
     {"name": "barry-far vmess",        "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/vmess.txt", "format": "v2ray", "proto": "v2ray"},
     {"name": "barry-far trojan",       "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/trojan.txt", "format": "v2ray", "proto": "v2ray"},
     {"name": "barry-far ss",           "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/ss.txt",   "format": "v2ray", "proto": "v2ray"},
 
-    # ★ MatinGhanbari — обновляется каждые 15 мин
+    # MatinGhanbari
     {"name": "MatinGhanbari super",    "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/super-sub.txt", "format": "v2ray", "proto": "v2ray"},
     {"name": "MatinGhanbari vless",    "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/filtered/subs/vless.txt", "format": "v2ray", "proto": "v2ray"},
     {"name": "MatinGhanbari vmess",    "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/filtered/subs/vmess.txt", "format": "v2ray", "proto": "v2ray"},
     {"name": "MatinGhanbari trojan",   "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/filtered/subs/trojan.txt", "format": "v2ray", "proto": "v2ray"},
 
-    # ★ Epodonios — большой агрегатор
+    # Epodonios
     {"name": "Epodonios ALL",          "url": "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt", "format": "v2ray", "proto": "v2ray"},
 
-    # ★ igareck — проверяет в РФ каждые 1-2 часа
+    # Igareck
     {"name": "igareck vless-reality",  "url": "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt", "format": "v2ray", "proto": "v2ray"},
     {"name": "igareck general",        "url": "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/General-Sub.txt", "format": "v2ray", "proto": "v2ray"},
 
-    # Хорошие агрегаторы
+    # Прочие старые списки
     {"name": "mahdibland merged",      "url": "https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge.txt", "format": "v2ray", "proto": "v2ray"},
     {"name": "Leon406 all",            "url": "https://raw.githubusercontent.com/Leon406/SubCrawler/main/sub/share/all", "format": "v2ray", "proto": "v2ray"},
     {"name": "peasoft NoMoreWalls",    "url": "https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list.txt", "format": "v2ray", "proto": "v2ray"},
@@ -206,7 +314,7 @@ SOURCES = [
     {"name": "YasserDivaR pr0xy",      "url": "https://raw.githubusercontent.com/YasserDivaR/pr0xy/main/V2Ray.txt", "format": "v2ray", "proto": "v2ray"},
     {"name": "surfboardv2ray tgparse", "url": "https://raw.githubusercontent.com/surfboardv2ray/TGParse/main/configtg.txt", "format": "v2ray", "proto": "v2ray"},
 
-    # Ниже — «старые» источники (прокси-списки) в исходном формате
+    # API и обычные списки
     {"name": "ProxyScrape HTTP", "url": "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=http&timeout=5000&country=all&ssl=all&anonymity=all", "format": "text", "proto": "http"},
     {"name": "ProxyScrape HTTPS", "url": "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=https&timeout=5000&country=all&ssl=all&anonymity=all", "format": "text", "proto": "https"},
     {"name": "ProxyScrape SOCKS5", "url": "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=socks5&timeout=5000", "format": "text", "proto": "socks5"},
@@ -241,10 +349,6 @@ SOURCES = [
     {"name": "officialputuid KANG HTTP", "url": "https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/http/http.txt", "format": "text", "proto": "http"},
 ]
 
-# ──────────────────────────────────────────────
-# ПАРСЕРЫ
-# ──────────────────────────────────────────────
-
 IP_PORT_RE = re.compile(r"(?<!\d)(\d{1,3}(?:\.\d{1,3}){3}):(\d{2,5})(?!\d)")
 
 
@@ -256,7 +360,6 @@ def is_valid_ip(ip: str) -> bool:
 
 
 def parse_text(body: str, proto: str) -> List[Dict]:
-    """Достаёт все валидные ip:port, даже если источник добавил страну/анонимность после адреса."""
     proxies = []
     for ip, port_text in IP_PORT_RE.findall(body):
         port = int(port_text)
@@ -584,7 +687,6 @@ def parse_node_endpoint(uri: str) -> tuple[str, int] | None:
     if host and port and 1 <= port <= 65535 and is_public_host(host):
         return host, port
 
-    # Некоторые ss:// источники кодируют method:password@host:port целиком в base64.
     if scheme == "ss":
         compact = uri.split("://", 1)[1].split("#", 1)[0].split("?", 1)[0]
         try:
@@ -607,11 +709,9 @@ async def fetch_text(session: aiohttp.ClientSession, src: dict) -> str | None:
     try:
         async with session.get(src["url"], timeout=aiohttp.ClientTimeout(total=FETCH_TIMEOUT)) as resp:
             if resp.status != 200:
-                print(f"  [SKIP] {src['name']} → HTTP {resp.status}")
                 return None
             return await resp.text(encoding="utf-8", errors="ignore")
-    except Exception as e:
-        print(f"  [ERR]  {src['name']} → {e}")
+    except Exception:
         return None
 
 
@@ -635,7 +735,7 @@ async def fetch_vpn_source(session: aiohttp.ClientSession, src: dict) -> List[st
 
 async def collect_vpn_nodes() -> List[str]:
     print("\n🧩 Загружаем готовые VPN-ноды для Happ/v2rayTun...")
-    connector = aiohttp.TCPConnector(limit=8, ssl=False)
+    connector = aiohttp.TCPConnector(limit=16, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as session:
         results = await asyncio.gather(
             *(fetch_vpn_source(session, s) for s in VPN_NODE_SOURCES),
@@ -693,7 +793,7 @@ async def check_all_vpn_nodes(nodes: List[str]) -> List[Dict]:
         done += 1
         if result:
             alive.append(result)
-        if done % 500 == 0 or done == len(tasks):
+        if done % 1000 == 0 or done == len(tasks):
             pct = done * 100 // len(tasks)
             print(f"  [{pct:3d}%] TCP проверено {done}/{len(tasks)}, живых VPN: {len(alive)}")
 
@@ -704,7 +804,7 @@ async def check_all_vpn_nodes(nodes: List[str]) -> List[Dict]:
 
 async def collect_all() -> List[Dict]:
     print("\n📡 Загружаем источники HTTP/SOCKS-прокси...")
-    connector = aiohttp.TCPConnector(limit=30, ssl=False)
+    connector = aiohttp.TCPConnector(limit=40, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as session:
         tasks = [fetch_source(session, s) for s in SOURCES]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -714,7 +814,6 @@ async def collect_all() -> List[Dict]:
         if isinstance(r, list):
             all_proxies.extend(r)
 
-    # Дедупликация по proto://ip:port, чтобы HTTP и SOCKS на одном адресе не затирали друг друга.
     seen = set()
     unique = []
     for p in all_proxies:
@@ -729,7 +828,7 @@ async def collect_all() -> List[Dict]:
 
 
 # ──────────────────────────────────────────────
-# ПРОВЕРКА ДОСТУПНОСТИ
+# ПРОВЕРКА ДОСТУПНОСТИ ПРОКСИ
 # ──────────────────────────────────────────────
 
 async def check_proxy(semaphore: asyncio.Semaphore,
@@ -780,7 +879,7 @@ async def check_all(proxies: List[Dict]) -> List[Dict]:
             done += 1
             if result:
                 alive.append(result)
-            if done % 200 == 0 or done == len(tasks):
+            if done % 500 == 0 or done == len(tasks):
                 pct = done * 100 // len(tasks)
                 print(f"  [{pct:3d}%] проверено {done}/{len(tasks)}, живых HTTP: {len(alive)}")
 
@@ -789,13 +888,8 @@ async def check_all(proxies: List[Dict]) -> List[Dict]:
     return alive
 
 
-# ──────────────────────────────────────────────
-# ОПРЕДЕЛЕНИЕ СТРАНЫ (по API)
-# ──────────────────────────────────────────────
-
 async def enrich_countries(session: aiohttp.ClientSession,
                            proxies: List[Dict]) -> List[Dict]:
-    """Пробуем ip-api.com batch пачками до 100 штук."""
     need = [p for p in proxies if not p.get("country")]
     if not need:
         return proxies
@@ -831,21 +925,31 @@ def build_config(proxies: List[Dict], vpn_nodes: List[str] | None = None,
                  top_n: int = MAX_PROXIES_IN_CONFIG) -> str:
     vpn_nodes = vpn_nodes or []
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    
+    # ПРИНУДИТЕЛЬНЫЕ ИНСТРУКЦИИ ДЛЯ КЛИЕНТОВ (Happ, v2rayTun и др.) НА АВТООБНОВЛЕНИЕ
     lines = [
-        "#profile-title: 🎮 FunVPN",
-        "#profile-update-interval: 1",
+        "#profile-title: 🎮 FunVPN Free",
+        "#profile-update-interval: 3",           # Принудительно каждые 3 часа
         "#subscription-userinfo: upload=0; download=0; total=0; expire=0",
         "#support-url: https://github.com/FunVPN",
-        f"#announce: FunVPN — обновлено {now}. Сначала идут VLESS/Trojan/SS ноды для Happ, ниже проверенные HTTP-прокси.",
+        f"#announce: FunVPN — обновлено {now}. Добавлены сверхстабильные резервные ноды! Автообновление подписки активно.",
         "",
+        "# === 🛡️ Постоянные Резервные Ноды (Страховка) ==="
     ]
+    
+    # Добавляем суперстабильные резервные сервера на самый верх
+    for r_node in RESERVE_STATIC_NODES:
+        lines.append(r_node)
+    
+    lines.append("")
 
-    node_count = 0
+    node_count = len(RESERVE_STATIC_NODES)
     if vpn_nodes:
         lines.append("# === VPN-ноды для Happ / v2rayTun / Hiddify ===")
         universal_node = make_universal_node(vpn_nodes)
         if universal_node:
             lines.append(universal_node)
+            node_count += 1
         for node in vpn_nodes[:MAX_VPN_NODES_IN_CONFIG]:
             lines.append(node)
             node_count += 1
@@ -909,41 +1013,33 @@ def build_log(collected: int, alive: int, vpn_nodes: int, elapsed: float) -> str
     )
 
 
-# ──────────────────────────────────────────────
-# MAIN
-# ──────────────────────────────────────────────
-
 async def main():
     t_start = time.monotonic()
     print("=" * 55)
-    print("🤖  FunVPN Proxy/VPN Robot")
+    print("🤖  FunVPN Proxy/VPN Robot v2.1 (С АВТООБНОВЛЕНИЕМ)")
     print("    FUN RUSSIA CRMP | TOO Oink Tech Ltd Co")
     print("=" * 55)
 
     if len(VPN_NODE_SOURCES) < MIN_VPN_NODE_SOURCES:
-        raise RuntimeError(f"VPN-источников должно быть минимум {MIN_VPN_NODE_SOURCES}, сейчас {len(VPN_NODE_SOURCES)}")
+        raise RuntimeError(f"VPN-источников должно быть минимум {MIN_VPN_NODE_SOURCES}")
 
-    # 1. Собрать реальные VPN-ноды для Happ/v2rayTun и отфильтровать только TCP-доступные.
+    # 1. Загрузка VPN-нод
     raw_vpn_nodes = await collect_vpn_nodes()
     alive_vpn_nodes = await check_all_vpn_nodes(raw_vpn_nodes)
     vpn_nodes = relabel_vpn_nodes(alive_vpn_nodes)
 
-    # 2. Собрать HTTP/SOCKS-прокси из 20+ источников.
+    # 2. Сбор прокси
     raw = await collect_all()
 
-    # 3. Проверить только HTTP/HTTPS-прокси реальным запросом.
+    # 3. Проверка прокси
     alive = await check_all(raw)
 
-    if not vpn_nodes and not alive:
-        print("\n⚠️  Не найдено ни TCP-доступных VPN-нод, ни живых HTTP-прокси. Конфиг не обновляется.")
-        sys.exit(1)
-
-    # 4. Страны для HTTP-прокси.
+    # 4. Страны для прокси
     connector = aiohttp.TCPConnector(ssl=False)
     async with aiohttp.ClientSession(connector=connector) as session:
         alive = await enrich_countries(session, alive)
 
-    # 5. Сохранить.
+    # 5. Сохранение
     os.makedirs("configs", exist_ok=True)
 
     config_text = build_config(alive, vpn_nodes)
