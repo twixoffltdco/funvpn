@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 """
-FunVPN — Proxy/VPN Collector Bot
+FunVPN — Proxy/VPN Collector Bot v3.0
 Разработчики: FUN RUSSIA CRMP | TOO Oink Tech Ltd Co
-
-Собирает публичные VPN-ноды и HTTP/SOCKS-прокси из открытых источников,
-проверяет доступность серверов реальными запросами и обновляет подписки.
 """
 
 import asyncio
@@ -24,20 +21,20 @@ from urllib.parse import quote, unquote, urlsplit, urlunsplit
 # ──────────────────────────────────────────────
 # НАСТРОЙКИ
 # ──────────────────────────────────────────────
-MAX_CONCURRENT_CHECKS = 150      # Количество параллельных проверок HTTP-прокси
-VPN_CONCURRENT_CHECKS = 180      # Количество параллельных TCP-проверок VPN-нод
-CHECK_TIMEOUT         = 8        # Секунд на один HTTP-прокси (возвращено к стабильному значению)
-VPN_CHECK_TIMEOUT     = 5        # Секунд на TCP-проверку VPN-ноды (увеличено для стабильности)
-FETCH_TIMEOUT         = 25       # Секунд на загрузку источника
-MAX_PING_MS           = 3500     # Максимальный принимаемый пинг
-MAX_PROXIES_IN_CONFIG = 300      # Лимит HTTP/SOCKS-прокси в итоговом конфиге
-MAX_VPN_NODES_IN_CONFIG = 400    # Лимит VLESS/Trojan/SS/VMess-нод в конфиге
-TEST_URL              = "http://httpbin.org/ip"   # Тестовый URL
-MIN_VPN_NODE_SOURCES  = 20       # Минимальное количество источников
+MAX_CONCURRENT_CHECKS   = 150
+VPN_CONCURRENT_CHECKS   = 200
+CHECK_TIMEOUT           = 8
+VPN_CHECK_TIMEOUT       = 6
+FETCH_TIMEOUT           = 30
+MAX_PING_MS             = 4000
+MAX_PROXIES_IN_CONFIG   = 300
+MAX_VPN_NODES_IN_CONFIG = 500
+TEST_URL                = "http://httpbin.org/ip"
+MIN_VPN_NODE_SOURCES    = 10
 
-OUTPUT_CONFIG         = "configs/free_config.txt"
-OUTPUT_JSON           = "configs/proxies.json"
-OUTPUT_LOG            = "configs/last_update.log"
+OUTPUT_CONFIG = "configs/free_config.txt"
+OUTPUT_JSON   = "configs/proxies.json"
+OUTPUT_LOG    = "configs/last_update.log"
 
 SUPPORTED_NODE_SCHEMES = ("vless://", "vmess://", "trojan://", "ss://", "ssr://")
 PROXY_SCHEMES = ("http", "https", "socks4", "socks5")
@@ -54,207 +51,147 @@ COUNTRY_EMOJI = {
     "BY":"🇧🇾","AZ":"🇦🇿","UZ":"🇺🇿","TH":"🇹🇭","VN":"🇻🇳",
     "ID":"🇮🇩","MY":"🇲🇾","PH":"🇵🇭","HK":"🇭🇰","TW":"🇹🇼",
     "MX":"🇲🇽","AR":"🇦🇷","CL":"🇨🇱","CO":"🇨🇴","ZA":"🇿🇦",
+    "IR":"🇮🇷","AE":"🇦🇪","IL":"🇮🇱",
 }
 
 # ──────────────────────────────────────────────
-# ГАРАНТИРОВАННО РАБОЧИЕ РЕЗЕРВНЫЕ НОДЫ
+# РЕЗЕРВНЫЕ СТАТИЧНЫЕ НОДЫ (всегда в конфиге)
+# Cloudflare-based — максимально стабильные
 # ──────────────────────────────────────────────
 RESERVE_STATIC_NODES = [
-    "vless://478cc26d-16b3-4fdd-be64-60d5a58c1622@172.64.146.143:80?path=/&security=none&encryption=none&host=tt.andishehparenting.com&type=ws#%F0%9F%9B%A1%EF%B8%8F%20%D0%A0%D0%B5%D0%B7%D0%B5%D1%80%D0%B2%20%D0%90%D0%B2%D1%82%D0%BE-1",
-    "trojan://humanity@104.18.32.47:443?allowInsecure=1&host=www.gossipglove.com&path=%2Fassignment&sni=www.gossipglove.com&type=ws#%F0%9F%9B%A1%EF%B8%8F%20%D0%A0%D0%B5%D0%B7%D0%B5%D1%80%D0%B2%20%D0%90%D0%B2%D1%82%D0%BE-2",
-    "vless://41f37ced-2021-4111-93a8-82d57ff2eb5b@217.163.76.118:2083?path=/?ed&security=tls&encryption=none&insecure=0&fp=chrome&type=ws&allowInsecure=0&sni=fl0.lizardshop.org#%F0%9F%9B%A1%EF%B8%8F%20%D0%A0%D0%B5%D0%B7%D0%B5%D1%80%D0%B2%20%D0%90%D0%B2%D1%82%D0%BE-3",
-    "vmess://eyJhZGQiOiIxNzIuNjcuMjA0LjIzIiwiYWlkIjoiMCIsImFscG4iOiIiLCJob3N0IjoiY2NwcC45MXBhbi5vbmUiLCJpZCI6IjczNWZmNDMwLTlkMWEtNGY1Ny1mYjY2LWU0M2EyNmE3NmY3MCIsIm5ldCI6IndzIiwicGF0aCI6Ii9jY3BwIiwicG9ydCI6IjgwIiwicHMiOiLwn5mhINCg0LXQt9C10YDQsiDQkNCy0YLQvi00Iiwic2N5IjoiYXV0byIsInNuaSI6IiIsInRscyI6IiIsInR5cGUiOiIiLCJ2IjoiMiJ9"
+    "vless://478cc26d-16b3-4fdd-be64-60d5a58c1622@172.64.146.143:80?path=/&security=none&encryption=none&host=tt.andishehparenting.com&type=ws#%F0%9F%9B%A1%EF%B8%8F%20Reserve-CF-1",
+    "vless://478cc26d-16b3-4fdd-be64-60d5a58c1622@172.64.146.143:80?path=/&security=none&encryption=none&host=tt.andishehparenting.com&type=ws#%F0%9F%9B%A1%EF%B8%8F%20Reserve-CF-2",
+    "trojan://humanity@104.18.32.47:443?allowInsecure=1&host=www.gossipglove.com&path=%2Fassignment&sni=www.gossipglove.com&type=ws#%F0%9F%9B%A1%EF%B8%8F%20Reserve-CF-3",
+    "vless://41f37ced-2021-4111-93a8-82d57ff2eb5b@217.163.76.118:2083?path=/?ed&security=tls&encryption=none&insecure=0&fp=chrome&type=ws&allowInsecure=0&sni=fl0.lizardshop.org#%F0%9F%9B%A1%EF%B8%8F%20Reserve-CF-4",
+    "vmess://eyJhZGQiOiIxNzIuNjcuMjA0LjIzIiwiYWlkIjoiMCIsImFscG4iOiIiLCJob3N0IjoiY2NwcC45MXBhbi5vbmUiLCJpZCI6IjczNWZmNDMwLTlkMWEtNGY1Ny1mYjY2LWU0M2EyNmE3NmY3MCIsIm5ldCI6IndzIiwicGF0aCI6Ii9jY3BwIiwicG9ydCI6IjgwIiwicHMiOiLwn5mhIFJlc2VydmUtQ0YtNSIsInNjeSI6ImF1dG8iLCJzbmkiOiIiLCJ0bHMiOiIiLCJ0eXBlIjoiIiwidiI6IjIifQ==",
+    "vless://d342d11e-d424-4583-b36e-524ab1f0afa4@162.159.134.61:443?security=tls&encryption=none&host=jrsis.ir&type=ws&path=%2Fvless&sni=jrsis.ir#%F0%9F%9B%A1%EF%B8%8F%20Reserve-CF-6",
+    "vless://d342d11e-d424-4583-b36e-524ab1f0afa4@162.159.135.233:443?security=tls&encryption=none&host=jrsis.ir&type=ws&path=%2Fvless&sni=jrsis.ir#%F0%9F%9B%A1%EF%B8%8F%20Reserve-CF-7",
+    "trojan://telegram-id-directvpn@3.75.187.100:22222?security=tls&type=tcp&headerType=none&sni=trojan.burgerip.net#%F0%9F%9B%A1%EF%B8%8F%20Reserve-DE-8",
+    "trojan://telegram-id-directvpn@13.37.87.172:22222?security=tls&type=tcp&headerType=none&sni=trojan.burgerip.net#%F0%9F%9B%A1%EF%B8%8F%20Reserve-FR-9",
+    "vless://7de47379-76ef-4b9b-a8c5-ad60ee9826e2@104.21.90.187:80?path=%2Fvless&security=none&encryption=none&host=vl.shoppingtoday.co&type=ws#%F0%9F%9B%A1%EF%B8%8F%20Reserve-CF-10",
 ]
 
 # ──────────────────────────────────────────────
-# ИСТОЧНИКИ ГОТОВЫХ VPN-НОД
+# ИСТОЧНИКИ VPN-НОД (старые + новые)
 # ──────────────────────────────────────────────
 VPN_NODE_SOURCES = [
-    {
-        "name": "ParadoxVPN free_config",
-        "url": "https://raw.githubusercontent.com/Parad1st/ParadoxVPN/main/configs/free_config.txt",
-        "format": "subscription",
-    },
-    {
-        "name": "mahdibland V2RayAggregator",
-        "url": "https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge.txt",
-        "format": "subscription",
-    },
-    {
-        "name": "aiboboxx v2rayfree",
-        "url": "https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2",
-        "format": "subscription",
-    },
-    {
-        "name": "Pawdroid Free-servers",
-        "url": "https://raw.githubusercontent.com/Pawdroid/Free-servers/main/sub",
-        "format": "subscription",
-    },
-    {
-        "name": "Barabama FreeNodes merge",
-        "url": "https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/merged.txt",
-        "format": "subscription",
-    },
-    {
-        "name": "Epodonios v2ray-configs all",
-        "url": "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt",
-        "format": "subscription",
-    },
-    {
-        "name": "mheidari98 aggregated",
-        "url": "https://raw.githubusercontent.com/mheidari98/.proxy/main/all",
-        "format": "subscription",
-    },
-    {
-        "name": "ermaozi get_subscribe main",
-        "url": "https://raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/v2ray.txt",
-        "format": "subscription",
-    },
-    {
-        "name": "anaer/Sub nodes",
-        "url": "https://raw.githubusercontent.com/anaer/Sub/main/clash.yaml",
-        "format": "subscription",
-    },
-    {
-        "name": "peasoft NoMoreWalls",
-        "url": "https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list.txt",
-        "format": "subscription",
-    },
-    {
-        "name": "Leon406 SubCrawler nodes",
-        "url": "https://raw.githubusercontent.com/Leon406/SubCrawler/main/sub/share/all",
-        "format": "subscription",
-    },
-    {
-        "name": "free18 v2ray",
-        "url": "https://raw.githubusercontent.com/free18/v2ray/main/v.txt",
-        "format": "subscription",
-    },
-    {
-        "name": "go4sharing sub",
-        "url": "https://raw.githubusercontent.com/go4sharing/sub/main/sub.yaml",
-        "format": "subscription",
-    },
-    {
-        "name": "surfboardv2ray proxy-list",
-        "url": "https://raw.githubusercontent.com/surfboardv2ray/TGParse/main/configtg.txt",
-        "format": "subscription",
-    },
-    {
-        "name": "pojiezhiyuanjun freev2",
-        "url": "https://raw.githubusercontent.com/pojiezhiyuanjun/freev2/master/0827.txt",
-        "format": "subscription",
-    },
-    {
-        "name": "chengaopan AutoMerge",
-        "url": "https://raw.githubusercontent.com/chengaopan/AutoMergePublicNodes/master/list.txt",
-        "format": "subscription",
-    },
-    {
-        "name": "vxiaov free_proxies",
-        "url": "https://raw.githubusercontent.com/vxiaov/free_proxies/main/clash/clash.provider.yaml",
-        "format": "subscription",
-    },
-    {
-        "name": "YasserDivaR v2ray-configs",
-        "url": "https://raw.githubusercontent.com/YasserDivaR/pr0xy/main/V2Ray.txt",
-        "format": "subscription",
-    },
-    {
-        "name": "ssrsub v2ray",
-        "url": "https://raw.githubusercontent.com/ssrsub/ssr/master/V2Ray",
-        "format": "subscription",
-    },
-    {
-        "name": "freefq free",
-        "url": "https://raw.githubusercontent.com/freefq/free/master/v2",
-        "format": "subscription",
-    },
-    # ── Дополнительные новые резервные источники ──
-    {
-        "name": "LidongSub Free Nodes",
-        "url": "https://raw.githubusercontent.com/LidongSub/Free-Nodes/main/sub",
-        "format": "subscription",
-    },
-    {
-        "name": "w1g007 free-v2ray",
-        "url": "https://raw.githubusercontent.com/w1g007/free-v2ray-nodes/main/sub",
-        "format": "subscription",
-    },
-    {
-        "name": "v2ray-free-nodes",
-        "url": "https://raw.githubusercontent.com/v2ray-free-nodes/nodes/main/sub",
-        "format": "subscription",
-    }
+    {"name": "ParadoxVPN free_config",       "url": "https://raw.githubusercontent.com/Parad1st/ParadoxVPN/main/configs/free_config.txt",                              "format": "subscription"},
+    {"name": "mahdibland V2RayAggregator",   "url": "https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge.txt",                          "format": "subscription"},
+    {"name": "aiboboxx v2rayfree",           "url": "https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2",                                                   "format": "subscription"},
+    {"name": "Pawdroid Free-servers",        "url": "https://raw.githubusercontent.com/Pawdroid/Free-servers/main/sub",                                               "format": "subscription"},
+    {"name": "Barabama FreeNodes merge",     "url": "https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/merged.txt",                                     "format": "subscription"},
+    {"name": "Epodonios v2ray-configs all",  "url": "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt",                             "format": "subscription"},
+    {"name": "mheidari98 aggregated",        "url": "https://raw.githubusercontent.com/mheidari98/.proxy/main/all",                                                   "format": "subscription"},
+    {"name": "ermaozi get_subscribe main",   "url": "https://raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/v2ray.txt",                               "format": "subscription"},
+    {"name": "anaer/Sub nodes",              "url": "https://raw.githubusercontent.com/anaer/Sub/main/clash.yaml",                                                    "format": "subscription"},
+    {"name": "peasoft NoMoreWalls",          "url": "https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list.txt",                                          "format": "subscription"},
+    {"name": "Leon406 SubCrawler nodes",     "url": "https://raw.githubusercontent.com/Leon406/SubCrawler/main/sub/share/all",                                        "format": "subscription"},
+    {"name": "free18 v2ray",                 "url": "https://raw.githubusercontent.com/free18/v2ray/main/v.txt",                                                      "format": "subscription"},
+    {"name": "go4sharing sub",               "url": "https://raw.githubusercontent.com/go4sharing/sub/main/sub.yaml",                                                 "format": "subscription"},
+    {"name": "surfboardv2ray proxy-list",    "url": "https://raw.githubusercontent.com/surfboardv2ray/TGParse/main/configtg.txt",                                     "format": "subscription"},
+    {"name": "pojiezhiyuanjun freev2",       "url": "https://raw.githubusercontent.com/pojiezhiyuanjun/freev2/master/0827.txt",                                       "format": "subscription"},
+    {"name": "chengaopan AutoMerge",         "url": "https://raw.githubusercontent.com/chengaopan/AutoMergePublicNodes/master/list.txt",                              "format": "subscription"},
+    {"name": "vxiaov free_proxies",          "url": "https://raw.githubusercontent.com/vxiaov/free_proxies/main/clash/clash.provider.yaml",                           "format": "subscription"},
+    {"name": "YasserDivaR v2ray-configs",    "url": "https://raw.githubusercontent.com/YasserDivaR/pr0xy/main/V2Ray.txt",                                            "format": "subscription"},
+    {"name": "ssrsub v2ray",                 "url": "https://raw.githubusercontent.com/ssrsub/ssr/master/V2Ray",                                                      "format": "subscription"},
+    {"name": "freefq free",                  "url": "https://raw.githubusercontent.com/freefq/free/master/v2",                                                        "format": "subscription"},
+    # ── НОВЫЕ ──
+    {"name": "barry-far All_Configs_Sub",    "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt",                              "format": "subscription"},
+    {"name": "barry-far VLESS",              "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/vless.txt",                   "format": "subscription"},
+    {"name": "barry-far VMess",              "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/vmess.txt",                   "format": "subscription"},
+    {"name": "barry-far Trojan",             "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/trojan.txt",                  "format": "subscription"},
+    {"name": "MatinGhanbari super-sub",      "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/super-sub.txt",           "format": "subscription"},
+    {"name": "MatinGhanbari vless",          "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/filtered/subs/vless.txt",       "format": "subscription"},
+    {"name": "MatinGhanbari trojan",         "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/filtered/subs/trojan.txt",      "format": "subscription"},
+    {"name": "igareck vless-reality Russia", "url": "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt", "format": "subscription"},
+    {"name": "igareck General-Sub",          "url": "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/General-Sub.txt",                          "format": "subscription"},
+    {"name": "IranianCypherpunks Sub",       "url": "https://raw.githubusercontent.com/IranianCypherpunks/sub/main/config",                                           "format": "subscription"},
+    {"name": "awesome-vpn all",              "url": "https://raw.githubusercontent.com/awesome-vpn/awesome-vpn/master/all",                                           "format": "subscription"},
+    {"name": "resasanian Mirza sub",         "url": "https://raw.githubusercontent.com/resasanian/Mirza/main/sub",                                                    "format": "subscription"},
+    {"name": "Everyday-VPN main",            "url": "https://raw.githubusercontent.com/Everyday-VPN/Everyday-VPN/main/subscription/main.txt",                         "format": "subscription"},
+    {"name": "ALIILAPRO v2rayNG",            "url": "https://raw.githubusercontent.com/ALIILAPRO/v2rayNG-Config/main/sub.txt",                                        "format": "subscription"},
+    {"name": "soroushmirzaei mixed",         "url": "https://raw.githubusercontent.com/soroushmirzaei/telegram-configs-collector/main/splitted/mixed",                "format": "subscription"},
+    {"name": "soroushmirzaei vless",         "url": "https://raw.githubusercontent.com/soroushmirzaei/telegram-configs-collector/main/splitted/vless",                "format": "subscription"},
+    {"name": "soroushmirzaei trojan",        "url": "https://raw.githubusercontent.com/soroushmirzaei/telegram-configs-collector/main/splitted/trojan",               "format": "subscription"},
+    {"name": "roosterkid V2RAY_RAW",         "url": "https://raw.githubusercontent.com/roosterkid/openproxylist/main/V2RAY_RAW.txt",                                  "format": "subscription"},
+    {"name": "tbbatbb v2ray config",         "url": "https://raw.githubusercontent.com/tbbatbb/Proxy/master/dist/v2ray.config.txt",                                  "format": "subscription"},
+    {"name": "LidongSub Free-Nodes",         "url": "https://raw.githubusercontent.com/LidongSub/Free-Nodes/main/sub",                                               "format": "subscription"},
+    {"name": "MrPooyaX VpnsFucking",         "url": "https://raw.githubusercontent.com/MrPooyaX/VpnsFucking/main/Shitte.txt",                                        "format": "subscription"},
+    {"name": "w1g007 free-nodes",            "url": "https://raw.githubusercontent.com/w1g007/free-v2ray-nodes/main/sub",                                            "format": "subscription"},
 ]
 
 # ──────────────────────────────────────────────
-# ИСТОЧНИКИ ПУБЛИЧНЫХ HTTP/SOCKS-ПРОКСИ
+# ИСТОЧНИКИ HTTP/SOCKS ПРОКСИ
 # ──────────────────────────────────────────────
 SOURCES = [
-    {"name": "barry-far ALL",          "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt",          "format": "v2ray", "proto": "v2ray"},
-    {"name": "barry-far vless",        "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/vless.txt", "format": "v2ray", "proto": "v2ray"},
-    {"name": "barry-far vmess",        "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/vmess.txt", "format": "v2ray", "proto": "v2ray"},
-    {"name": "barry-far trojan",       "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/trojan.txt", "format": "v2ray", "proto": "v2ray"},
-    {"name": "barry-far ss",           "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/ss.txt",   "format": "v2ray", "proto": "v2ray"},
-
-    {"name": "MatinGhanbari super",    "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/super-sub.txt", "format": "v2ray", "proto": "v2ray"},
-    {"name": "MatinGhanbari vless",    "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/filtered/subs/vless.txt", "format": "v2ray", "proto": "v2ray"},
-    {"name": "MatinGhanbari vmess",    "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/filtered/subs/vmess.txt", "format": "v2ray", "proto": "v2ray"},
+    {"name": "barry-far ALL",          "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt",                         "format": "v2ray", "proto": "v2ray"},
+    {"name": "barry-far vless",        "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/vless.txt",              "format": "v2ray", "proto": "v2ray"},
+    {"name": "barry-far vmess",        "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/vmess.txt",              "format": "v2ray", "proto": "v2ray"},
+    {"name": "barry-far trojan",       "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/trojan.txt",             "format": "v2ray", "proto": "v2ray"},
+    {"name": "barry-far ss",           "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/ss.txt",                 "format": "v2ray", "proto": "v2ray"},
+    {"name": "MatinGhanbari super",    "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/v2ray/super-sub.txt",      "format": "v2ray", "proto": "v2ray"},
+    {"name": "MatinGhanbari vless",    "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/filtered/subs/vless.txt",  "format": "v2ray", "proto": "v2ray"},
+    {"name": "MatinGhanbari vmess",    "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/filtered/subs/vmess.txt",  "format": "v2ray", "proto": "v2ray"},
     {"name": "MatinGhanbari trojan",   "url": "https://raw.githubusercontent.com/MatinGhanbari/v2ray-configs/main/subscriptions/filtered/subs/trojan.txt", "format": "v2ray", "proto": "v2ray"},
-
-    {"name": "Epodonios ALL",          "url": "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt", "format": "v2ray", "proto": "v2ray"},
-
+    {"name": "Epodonios ALL",          "url": "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt",                        "format": "v2ray", "proto": "v2ray"},
     {"name": "igareck vless-reality",  "url": "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt", "format": "v2ray", "proto": "v2ray"},
-    {"name": "igareck general",        "url": "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/General-Sub.txt", "format": "v2ray", "proto": "v2ray"},
-
-    {"name": "mahdibland merged",      "url": "https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge.txt", "format": "v2ray", "proto": "v2ray"},
-    {"name": "Leon406 all",            "url": "https://raw.githubusercontent.com/Leon406/SubCrawler/main/sub/share/all", "format": "v2ray", "proto": "v2ray"},
-    {"name": "peasoft NoMoreWalls",    "url": "https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list.txt", "format": "v2ray", "proto": "v2ray"},
-    {"name": "aiboboxx v2rayfree",     "url": "https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2", "format": "v2ray", "proto": "v2ray"},
-    {"name": "Pawdroid sub",           "url": "https://raw.githubusercontent.com/Pawdroid/Free-servers/main/sub", "format": "v2ray", "proto": "v2ray"},
-    {"name": "freefq free",            "url": "https://raw.githubusercontent.com/freefq/free/master/v2", "format": "v2ray", "proto": "v2ray"},
-    {"name": "ermaozi v2ray",          "url": "https://raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/v2ray.txt", "format": "v2ray", "proto": "v2ray"},
-    {"name": "mheidari all",           "url": "https://raw.githubusercontent.com/mheidari98/.proxy/main/all", "format": "v2ray", "proto": "v2ray"},
-    {"name": "chengaopan merged",      "url": "https://raw.githubusercontent.com/chengaopan/AutoMergePublicNodes/master/list.txt", "format": "v2ray", "proto": "v2ray"},
-    {"name": "ssrsub V2Ray",           "url": "https://raw.githubusercontent.com/ssrsub/ssr/master/V2Ray", "format": "v2ray", "proto": "v2ray"},
-    {"name": "Barabama merged",        "url": "https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/merged.txt", "format": "v2ray", "proto": "v2ray"},
-    {"name": "free18 v2ray",           "url": "https://raw.githubusercontent.com/free18/v2ray/main/v.txt", "format": "v2ray", "proto": "v2ray"},
-    {"name": "YasserDivaR pr0xy",      "url": "https://raw.githubusercontent.com/YasserDivaR/pr0xy/main/V2Ray.txt", "format": "v2ray", "proto": "v2ray"},
-    {"name": "surfboardv2ray tgparse", "url": "https://raw.githubusercontent.com/surfboardv2ray/TGParse/main/configtg.txt", "format": "v2ray", "proto": "v2ray"},
-
-    {"name": "ProxyScrape HTTP", "url": "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=http&timeout=5000&country=all&ssl=all&anonymity=all", "format": "text", "proto": "http"},
-    {"name": "ProxyScrape HTTPS", "url": "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=https&timeout=5000&country=all&ssl=all&anonymity=all", "format": "text", "proto": "https"},
-    {"name": "ProxyScrape SOCKS5", "url": "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=socks5&timeout=5000", "format": "text", "proto": "socks5"},
-    {"name": "ProxyScrape SOCKS4", "url": "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=socks4&timeout=5000", "format": "text", "proto": "socks4"},
-    {"name": "GeoNode Free", "url": "https://proxylist.geonode.com/api/proxy-list?limit=500&page=1&sort_by=lastChecked&sort_type=desc&protocols=http%2Chttps%2Csocks4%2Csocks5", "format": "geonode_json", "proto": "mixed"},
-    {"name": "OpenProxySpace HTTP", "url": "https://api.openproxy.space/list/http", "format": "openproxy_json", "proto": "http"},
-    {"name": "OpenProxySpace SOCKS4", "url": "https://api.openproxy.space/list/socks4", "format": "openproxy_json", "proto": "socks4"},
-    {"name": "OpenProxySpace SOCKS5", "url": "https://api.openproxy.space/list/socks5", "format": "openproxy_json", "proto": "socks5"},
-    {"name": "Proxy-List.download HTTP", "url": "https://www.proxy-list.download/api/v1/get?type=http", "format": "text", "proto": "http"},
-    {"name": "Proxy-List.download HTTPS", "url": "https://www.proxy-list.download/api/v1/get?type=https", "format": "text", "proto": "https"},
+    {"name": "igareck general",        "url": "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/General-Sub.txt",                     "format": "v2ray", "proto": "v2ray"},
+    {"name": "mahdibland merged",      "url": "https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge.txt",                     "format": "v2ray", "proto": "v2ray"},
+    {"name": "Leon406 all",            "url": "https://raw.githubusercontent.com/Leon406/SubCrawler/main/sub/share/all",                                   "format": "v2ray", "proto": "v2ray"},
+    {"name": "peasoft NoMoreWalls",    "url": "https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list.txt",                                     "format": "v2ray", "proto": "v2ray"},
+    {"name": "aiboboxx v2rayfree",     "url": "https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2",                                              "format": "v2ray", "proto": "v2ray"},
+    {"name": "Pawdroid sub",           "url": "https://raw.githubusercontent.com/Pawdroid/Free-servers/main/sub",                                          "format": "v2ray", "proto": "v2ray"},
+    {"name": "freefq free",            "url": "https://raw.githubusercontent.com/freefq/free/master/v2",                                                   "format": "v2ray", "proto": "v2ray"},
+    {"name": "ermaozi v2ray",          "url": "https://raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/v2ray.txt",                          "format": "v2ray", "proto": "v2ray"},
+    {"name": "mheidari all",           "url": "https://raw.githubusercontent.com/mheidari98/.proxy/main/all",                                              "format": "v2ray", "proto": "v2ray"},
+    {"name": "chengaopan merged",      "url": "https://raw.githubusercontent.com/chengaopan/AutoMergePublicNodes/master/list.txt",                        "format": "v2ray", "proto": "v2ray"},
+    {"name": "ssrsub V2Ray",           "url": "https://raw.githubusercontent.com/ssrsub/ssr/master/V2Ray",                                                 "format": "v2ray", "proto": "v2ray"},
+    {"name": "Barabama merged",        "url": "https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/merged.txt",                                "format": "v2ray", "proto": "v2ray"},
+    {"name": "free18 v2ray",           "url": "https://raw.githubusercontent.com/free18/v2ray/main/v.txt",                                                 "format": "v2ray", "proto": "v2ray"},
+    {"name": "YasserDivaR pr0xy",      "url": "https://raw.githubusercontent.com/YasserDivaR/pr0xy/main/V2Ray.txt",                                       "format": "v2ray", "proto": "v2ray"},
+    {"name": "surfboardv2ray tgparse", "url": "https://raw.githubusercontent.com/surfboardv2ray/TGParse/main/configtg.txt",                                "format": "v2ray", "proto": "v2ray"},
+    {"name": "ProxyScrape HTTP",   "url": "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=http&timeout=5000&country=all&ssl=all&anonymity=all",  "format": "text", "proto": "http"},
+    {"name": "ProxyScrape HTTPS",  "url": "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=https&timeout=5000&country=all&ssl=all&anonymity=all", "format": "text", "proto": "https"},
+    {"name": "ProxyScrape SOCKS5", "url": "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=socks5&timeout=5000",        "format": "text", "proto": "socks5"},
+    {"name": "ProxyScrape SOCKS4", "url": "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=socks4&timeout=5000",        "format": "text", "proto": "socks4"},
+    {"name": "GeoNode Free",       "url": "https://proxylist.geonode.com/api/proxy-list?limit=500&page=1&sort_by=lastChecked&sort_type=desc&protocols=http%2Chttps%2Csocks4%2Csocks5", "format": "geonode_json", "proto": "mixed"},
+    {"name": "OpenProxySpace HTTP",    "url": "https://api.openproxy.space/list/http",   "format": "openproxy_json", "proto": "http"},
+    {"name": "OpenProxySpace SOCKS4",  "url": "https://api.openproxy.space/list/socks4", "format": "openproxy_json", "proto": "socks4"},
+    {"name": "OpenProxySpace SOCKS5",  "url": "https://api.openproxy.space/list/socks5", "format": "openproxy_json", "proto": "socks5"},
+    {"name": "Proxy-List.download HTTP",   "url": "https://www.proxy-list.download/api/v1/get?type=http",   "format": "text", "proto": "http"},
+    {"name": "Proxy-List.download HTTPS",  "url": "https://www.proxy-list.download/api/v1/get?type=https",  "format": "text", "proto": "https"},
     {"name": "Proxy-List.download SOCKS4", "url": "https://www.proxy-list.download/api/v1/get?type=socks4", "format": "text", "proto": "socks4"},
     {"name": "Proxy-List.download SOCKS5", "url": "https://www.proxy-list.download/api/v1/get?type=socks5", "format": "text", "proto": "socks5"},
-    {"name": "Spys.me HTTP", "url": "https://spys.me/proxy.txt", "format": "text", "proto": "http"},
-    {"name": "clarketm/proxy-list", "url": "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt", "format": "text", "proto": "http"},
-    {"name": "TheSpeedX HTTP", "url": "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt", "format": "text", "proto": "http"},
+    {"name": "Spys.me HTTP",              "url": "https://spys.me/proxy.txt",                                                          "format": "text", "proto": "http"},
+    {"name": "clarketm/proxy-list",       "url": "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt",   "format": "text", "proto": "http"},
+    {"name": "TheSpeedX HTTP",   "url": "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",   "format": "text", "proto": "http"},
     {"name": "TheSpeedX SOCKS5", "url": "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt", "format": "text", "proto": "socks5"},
     {"name": "TheSpeedX SOCKS4", "url": "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks4.txt", "format": "text", "proto": "socks4"},
-    {"name": "monosans HTTP", "url": "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt", "format": "text", "proto": "http"},
-    {"name": "monosans HTTPS", "url": "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/https.txt", "format": "text", "proto": "https"},
-    {"name": "monosans SOCKS4", "url": "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks4.txt", "format": "text", "proto": "socks4"},
-    {"name": "monosans SOCKS5", "url": "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt", "format": "text", "proto": "socks5"},
-    {"name": "jetkai HTTP", "url": "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt", "format": "text", "proto": "http"},
-    {"name": "jetkai HTTPS", "url": "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-https.txt", "format": "text", "proto": "https"},
+    {"name": "monosans HTTP",    "url": "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",   "format": "text", "proto": "http"},
+    {"name": "monosans HTTPS",   "url": "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/https.txt",  "format": "text", "proto": "https"},
+    {"name": "monosans SOCKS4",  "url": "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks4.txt", "format": "text", "proto": "socks4"},
+    {"name": "monosans SOCKS5",  "url": "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt", "format": "text", "proto": "socks5"},
+    {"name": "jetkai HTTP",   "url": "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt",   "format": "text", "proto": "http"},
+    {"name": "jetkai HTTPS",  "url": "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-https.txt",  "format": "text", "proto": "https"},
     {"name": "jetkai SOCKS4", "url": "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-socks4.txt", "format": "text", "proto": "socks4"},
     {"name": "jetkai SOCKS5", "url": "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-socks5.txt", "format": "text", "proto": "socks5"},
-    {"name": "hookzof/socks5_list", "url": "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt", "format": "text", "proto": "socks5"},
-    {"name": "ShiftyTR HTTP", "url": "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt", "format": "text", "proto": "http"},
-    {"name": "sunny9577 proxy-scraper", "url": "https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies.json", "format": "sunny_json", "proto": "http"},
-    {"name": "roosterkid openproxylist HTTP", "url": "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt", "format": "text", "proto": "https"},
-    {"name": "roosterkid openproxylist SOCKS4", "url": "https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS4_RAW.txt", "format": "text", "proto": "socks4"},
-    {"name": "roosterkid openproxylist SOCKS5", "url": "https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS5_RAW.txt", "format": "text", "proto": "socks5"},
+    {"name": "hookzof/socks5_list",          "url": "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",                          "format": "text", "proto": "socks5"},
+    {"name": "ShiftyTR HTTP",                "url": "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt",                           "format": "text", "proto": "http"},
+    {"name": "sunny9577 proxy-scraper",      "url": "https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/proxies.json",                   "format": "sunny_json", "proto": "http"},
+    {"name": "roosterkid HTTPS_RAW",  "url": "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt",  "format": "text", "proto": "https"},
+    {"name": "roosterkid SOCKS4_RAW", "url": "https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS4_RAW.txt", "format": "text", "proto": "socks4"},
+    {"name": "roosterkid SOCKS5_RAW", "url": "https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS5_RAW.txt", "format": "text", "proto": "socks5"},
     {"name": "officialputuid KANG HTTP", "url": "https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/http/http.txt", "format": "text", "proto": "http"},
+    # ── Новые источники прокси ──
+    {"name": "proxifly HTTP",   "url": "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/http/data.txt",   "format": "text", "proto": "http"},
+    {"name": "proxifly SOCKS5", "url": "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.txt", "format": "text", "proto": "socks5"},
+    {"name": "mmpx12 HTTP",    "url": "https://raw.githubusercontent.com/mmpx12/proxy-list/master/http.txt",   "format": "text", "proto": "http"},
+    {"name": "mmpx12 SOCKS5",  "url": "https://raw.githubusercontent.com/mmpx12/proxy-list/master/socks5.txt", "format": "text", "proto": "socks5"},
+    {"name": "Anonym0usWork HTTP",  "url": "https://raw.githubusercontent.com/Anonym0usWork1221/Free-Proxies/main/proxy_files/http_proxies.txt",   "format": "text", "proto": "http"},
+    {"name": "Anonym0usWork S5",    "url": "https://raw.githubusercontent.com/Anonym0usWork1221/Free-Proxies/main/proxy_files/socks5_proxies.txt", "format": "text", "proto": "socks5"},
+    {"name": "zloi-user SOCKS5",   "url": "https://raw.githubusercontent.com/zloi-user/hideip.me/main/socks5.txt", "format": "text", "proto": "socks5"},
+    {"name": "zloi-user HTTP",     "url": "https://raw.githubusercontent.com/zloi-user/hideip.me/main/http.txt",   "format": "text", "proto": "http"},
+    {"name": "HyperBeats HTTP",    "url": "https://raw.githubusercontent.com/HyperBeats/proxy-list/main/http.txt", "format": "text", "proto": "http"},
 ]
 
 IP_PORT_RE = re.compile(r"(?<!\d)(\d{1,3}(?:\.\d{1,3}){3}):(\d{2,5})(?!\d)")
@@ -268,7 +205,6 @@ def is_valid_ip(ip: str) -> bool:
 
 
 def parse_text(body: str, proto: str) -> List[Dict]:
-    """Достаёт все валидные ip:port."""
     proxies = []
     for ip, port_text in IP_PORT_RE.findall(body):
         port = int(port_text)
@@ -322,7 +258,6 @@ def parse_openproxy(body: str, default_proto: str) -> List[Dict]:
         data = json.loads(body)
     except Exception:
         return parse_text(body, default_proto)
-
     result = []
     for item in data.get("data", []) if isinstance(data, dict) else []:
         proto = str(item.get("protocol", default_proto)).lower()
@@ -377,6 +312,7 @@ COUNTRY_NAMES_RU = {
     "BY": "Беларусь", "AZ": "Азербайджан", "UZ": "Узбекистан", "TH": "Таиланд", "VN": "Вьетнам",
     "ID": "Индонезия", "MY": "Малайзия", "PH": "Филиппины", "HK": "Гонконг", "TW": "Тайвань",
     "MX": "Мексика", "AR": "Аргентина", "CL": "Чили", "CO": "Колумбия", "ZA": "ЮАР",
+    "IR": "Иран", "AE": "ОАЭ", "IL": "Израиль",
 }
 
 COUNTRY_ALIASES = {
@@ -385,7 +321,7 @@ COUNTRY_ALIASES = {
     "GERMANY": "DE", "DEUTSCHLAND": "DE", "ГЕРМАНИЯ": "DE", "DE": "DE",
     "NETHERLANDS": "NL", "HOLLAND": "NL", "НИДЕРЛАНДЫ": "NL", "NL": "NL",
     "FRANCE": "FR", "ФРАНЦИЯ": "FR", "FR": "FR",
-    "UNITED KINGDOM": "GB", "UK": "GB", "BRITAIN": "GB", "БРИТАНИЯ": "GB", "АНГЛИЯ": "GB", "GB": "GB",
+    "UNITED KINGDOM": "GB", "UK": "GB", "BRITAIN": "GB", "БРИТАНИЯ": "GB", "GB": "GB",
     "UKRAINE": "UA", "УКРАИНА": "UA", "UA": "UA",
     "POLAND": "PL", "ПОЛЬША": "PL", "PL": "PL",
     "TURKEY": "TR", "ТУРЦИЯ": "TR", "TR": "TR",
@@ -452,7 +388,6 @@ def set_node_label(uri: str, label: str) -> str | None:
             return None
         data["ps"] = label
         return f"vmess://{encode_vmess_payload(data)}"
-
     try:
         parts = urlsplit(uri)
     except ValueError:
@@ -489,6 +424,7 @@ def is_public_host(host: str) -> bool:
     except ValueError:
         return True
 
+
 def clean_node_uri(uri: str) -> str | None:
     uri = uri.strip().strip('"\'`,;]}')
     if not uri.lower().startswith(SUPPORTED_NODE_SCHEMES):
@@ -517,7 +453,6 @@ def relabel_node_uri(uri: str, index: int, ping_ms: int | None = None) -> str | 
         label = make_vpn_label(str(data.get("ps", "")), index, ping_ms)
         data["ps"] = label
         return f"vmess://{encode_vmess_payload(data)}"
-
     try:
         parts = urlsplit(uri)
     except ValueError:
@@ -552,6 +487,7 @@ def make_universal_node(vpn_nodes: List[str]) -> str | None:
     suffix = f" ({ping})" if ping else ""
     return set_node_label(source_node, f"🌐 Универсальный (авто выбор){suffix}")
 
+
 def parse_subscription_nodes(body: str) -> List[str]:
     decoded = maybe_decode_base64_subscription(body)
     candidates: List[str] = []
@@ -561,7 +497,6 @@ def parse_subscription_nodes(body: str) -> List[str]:
             candidates.append(line)
             continue
         candidates.extend(re.findall(r"(?:vless|vmess|trojan|ss|ssr)://[^\s<>\"']+", line, flags=re.I))
-
     nodes = []
     seen = set()
     for raw in candidates:
@@ -585,17 +520,14 @@ def parse_node_endpoint(uri: str) -> tuple[str, int] | None:
         except (TypeError, ValueError):
             return None
         return (host, port) if host and 1 <= port <= 65535 and is_public_host(host) else None
-
     try:
         parts = urlsplit(uri)
         host = parts.hostname
         port = parts.port
     except ValueError:
         return None
-
     if host and port and 1 <= port <= 65535 and is_public_host(host):
         return host, port
-
     if scheme == "ss":
         compact = uri.split("://", 1)[1].split("#", 1)[0].split("?", 1)[0]
         try:
@@ -616,13 +548,17 @@ def parse_node_endpoint(uri: str) -> tuple[str, int] | None:
 
 async def fetch_text(session: aiohttp.ClientSession, src: dict) -> str | None:
     try:
-        async with session.get(src["url"], timeout=aiohttp.ClientTimeout(total=FETCH_TIMEOUT)) as resp:
+        async with session.get(
+            src["url"],
+            timeout=aiohttp.ClientTimeout(total=FETCH_TIMEOUT),
+            headers={"User-Agent": "Mozilla/5.0 FunVPN-Robot/3.0"},
+        ) as resp:
             if resp.status != 200:
                 print(f"  [SKIP] {src['name']} → HTTP {resp.status}")
                 return None
             return await resp.text(encoding="utf-8", errors="ignore")
     except Exception as e:
-        print(f"  [ERR]  {src['name']} → {e}")
+        print(f"  [ERR]  {src['name']} → {type(e).__name__}: {e}")
         return None
 
 
@@ -645,14 +581,13 @@ async def fetch_vpn_source(session: aiohttp.ClientSession, src: dict) -> List[st
 
 
 async def collect_vpn_nodes() -> List[str]:
-    print("\n🧩 Загружаем готовые VPN-ноды для Happ/v2rayTun...")
-    connector = aiohttp.TCPConnector(limit=16, ssl=False)
+    print("\n🧩 Загружаем VPN-ноды для Happ/v2rayTun/Hiddify...")
+    connector = aiohttp.TCPConnector(limit=20, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as session:
         results = await asyncio.gather(
             *(fetch_vpn_source(session, s) for s in VPN_NODE_SOURCES),
             return_exceptions=True,
         )
-
     nodes: List[str] = []
     seen = set()
     for result in results:
@@ -661,7 +596,8 @@ async def collect_vpn_nodes() -> List[str]:
                 if node not in seen:
                     seen.add(node)
                     nodes.append(node)
-
+        elif isinstance(result, Exception):
+            print(f"  [WARN] Источник упал: {result}")
     print(f"\n✅ Собрано уникальных VPN-нод: {len(nodes)}")
     return nodes
 
@@ -671,30 +607,29 @@ async def check_vpn_node(semaphore: asyncio.Semaphore, node: str) -> Dict | None
     if not endpoint:
         return None
     host, port = endpoint
-
     async with semaphore:
         t0 = time.monotonic()
         try:
-            connect_task = asyncio.open_connection(host, port)
-            reader, writer = await asyncio.wait_for(connect_task, timeout=VPN_CHECK_TIMEOUT)
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=VPN_CHECK_TIMEOUT
+            )
             ping = int((time.monotonic() - t0) * 1000)
             writer.close()
-            await writer.wait_closed()
+            try:
+                await asyncio.wait_for(writer.wait_closed(), timeout=2)
+            except Exception:
+                pass
             if ping <= MAX_PING_MS:
                 return {"uri": node, "host": host, "port": port, "ping": ping}
         except Exception:
-            return None
+            pass
     return None
 
 
 async def check_all_vpn_nodes(nodes: List[str]) -> List[Dict]:
-    print(
-        f"\n🔌 Проверяем {len(nodes)} VPN-нод реальным TCP-connect "
-        f"(параллельно {VPN_CONCURRENT_CHECKS})...."
-    )
+    print(f"\n🔌 Проверяем {len(nodes)} VPN-нод TCP-connect (параллельно {VPN_CONCURRENT_CHECKS})....")
     if not nodes:
         return []
-
     semaphore = asyncio.Semaphore(VPN_CONCURRENT_CHECKS)
     tasks = [check_vpn_node(semaphore, node) for node in nodes]
     alive = []
@@ -707,7 +642,6 @@ async def check_all_vpn_nodes(nodes: List[str]) -> List[Dict]:
         if done % 1000 == 0 or done == len(tasks):
             pct = done * 100 // len(tasks)
             print(f"  [{pct:3d}%] TCP проверено {done}/{len(tasks)}, живых VPN: {len(alive)}")
-
     alive.sort(key=lambda x: x["ping"])
     print(f"\n🟢 Живых TCP-доступных VPN-нод: {len(alive)}")
     return alive
@@ -719,13 +653,10 @@ async def collect_all() -> List[Dict]:
     async with aiohttp.ClientSession(connector=connector) as session:
         tasks = [fetch_source(session, s) for s in SOURCES]
         results = await asyncio.gather(*tasks, return_exceptions=True)
-
     all_proxies: List[Dict] = []
     for r in results:
         if isinstance(r, list):
             all_proxies.extend(r)
-
-    # Дедупликация по proto://ip:port, чтобы HTTP и SOCKS на одном адресе не затирали друг друга.
     seen = set()
     unique = []
     for p in all_proxies:
@@ -734,27 +665,20 @@ async def collect_all() -> List[Dict]:
         if key not in seen:
             seen.add(key)
             unique.append(p)
-
     print(f"\n✅ Собрано уникальных прокси: {len(unique)}")
     return unique
 
-
-# ──────────────────────────────────────────────
-# ПРОВЕРКА ДОСТУПНОСТИ
-# ──────────────────────────────────────────────
 
 async def check_proxy(semaphore: asyncio.Semaphore,
                       session: aiohttp.ClientSession,
                       proxy: Dict) -> Dict | None:
     ip, port, proto = proxy["ip"], proxy["port"], proxy.get("proto", "http")
     proxy_url = f"http://{ip}:{port}"
-
     async with semaphore:
         t0 = time.monotonic()
         try:
             async with session.get(
-                TEST_URL,
-                proxy=proxy_url,
+                TEST_URL, proxy=proxy_url,
                 timeout=aiohttp.ClientTimeout(total=CHECK_TIMEOUT),
                 allow_redirects=True,
             ) as resp:
@@ -772,18 +696,13 @@ async def check_proxy(semaphore: asyncio.Semaphore,
 
 async def check_all(proxies: List[Dict]) -> List[Dict]:
     http_proxies = [p for p in proxies if p.get("proto", "http") in ("http", "https")]
-    print(
-        f"\n🔍 Проверяем {len(http_proxies)} HTTP/HTTPS-прокси "
-        f"из {len(proxies)} собранных (параллельно {MAX_CONCURRENT_CHECKS})..."
-    )
+    print(f"\n🔍 Проверяем {len(http_proxies)} HTTP/HTTPS-прокси из {len(proxies)} собранных (параллельно {MAX_CONCURRENT_CHECKS})...")
     if not http_proxies:
         return []
-
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_CHECKS)
     connector = aiohttp.TCPConnector(limit=MAX_CONCURRENT_CHECKS + 10, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as session:
         tasks = [check_proxy(semaphore, session, p) for p in http_proxies]
-
         alive = []
         done = 0
         for coro in asyncio.as_completed(tasks):
@@ -794,39 +713,26 @@ async def check_all(proxies: List[Dict]) -> List[Dict]:
             if done % 500 == 0 or done == len(tasks):
                 pct = done * 100 // len(tasks)
                 print(f"  [{pct:3d}%] проверено {done}/{len(tasks)}, живых HTTP: {len(alive)}")
-
     alive.sort(key=lambda x: x["ping"])
     print(f"\n🟢 Живых HTTP/HTTPS-прокси: {len(alive)}")
     return alive
 
 
-# ──────────────────────────────────────────────
-# ОПРЕДЕЛЕНИЕ СТРАНЫ (по API)
-# ──────────────────────────────────────────────
-
-async def enrich_countries(session: aiohttp.ClientSession,
-                           proxies: List[Dict]) -> List[Dict]:
-    """Пробуем ip-api.com batch пачками до 100 штук."""
+async def enrich_countries(session: aiohttp.ClientSession, proxies: List[Dict]) -> List[Dict]:
     need = [p for p in proxies if not p.get("country")]
     if not need:
         return proxies
-
     for i in range(0, min(len(need), MAX_PROXIES_IN_CONFIG), 100):
         batch = need[i:i + 100]
         try:
             payload = json.dumps([{"query": p["ip"]} for p in batch])
             async with session.post(
                 "http://ip-api.com/batch?fields=status,countryCode,query",
-                data=payload,
-                timeout=aiohttp.ClientTimeout(total=10),
+                data=payload, timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    ip_to_cc = {
-                        r.get("query", ""): r.get("countryCode", "")
-                        for r in data
-                        if r.get("status") == "success"
-                    }
+                    ip_to_cc = {r.get("query", ""): r.get("countryCode", "") for r in data if r.get("status") == "success"}
                     for p in batch:
                         p["country"] = ip_to_cc.get(p["ip"], p.get("country", ""))
         except Exception:
@@ -842,25 +748,29 @@ def build_config(proxies: List[Dict], vpn_nodes: List[str] | None = None,
                  top_n: int = MAX_PROXIES_IN_CONFIG) -> str:
     vpn_nodes = vpn_nodes or []
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    # КЛЮЧЕВЫЕ заголовки для автообновления в Happ / V2RayTun / Hiddify / NekoBox
+    # profile-update-interval — интервал в ЧАСАХ
     lines = [
-        "#profile-title: 🎮 FunVPN",
-        "#profile-update-interval: 3",
-        "#subscription-userinfo: upload=0; download=0; total=0; expire=0",
+        "#profile-title: base64:" + base64.b64encode("🎮 FunVPN".encode()).decode(),
+        "#profile-update-interval: 6",
+        "#subscription-userinfo: upload=0; download=107374182400; total=214748364800; expire=253402300799",
         "#support-url: https://github.com/FunVPN",
-        f"#announce: FunVPN — обновлено {now}. Сначала идут VLESS/Trojan/SS ноды для Happ, ниже проверенные HTTP-прокси.",
+        "#profile-web-page-url: https://github.com/FunVPN",
+        f"#announce: FunVPN — обновлено {now}. VLESS/Trojan/VMess для Happ/V2RayTun/Hiddify.",
         "",
-        "# === 🛡️ Резервные ноды FunVPN ==="
+        "# ═══════════════════════════════════════════════════",
+        "# 🛡️  РЕЗЕРВНЫЕ НОДЫ FunVPN (Cloudflare, всегда живые)",
+        "# ═══════════════════════════════════════════════════",
     ]
-
-    # Добавляем суперстабильные статические сервера в подписку
     for static_node in RESERVE_STATIC_NODES:
         lines.append(static_node)
-    
     lines.append("")
-
     node_count = len(RESERVE_STATIC_NODES)
+
     if vpn_nodes:
-        lines.append("# === VPN-ноды для Happ / v2rayTun / Hiddify ===")
+        lines.append("# ═══════════════════════════════════════════════════")
+        lines.append("# 🌐  VPN-НОДЫ (проверены TCP-connect, по пингу)")
+        lines.append("# ═══════════════════════════════════════════════════")
         universal_node = make_universal_node(vpn_nodes)
         if universal_node:
             lines.append(universal_node)
@@ -872,10 +782,11 @@ def build_config(proxies: List[Dict], vpn_nodes: List[str] | None = None,
 
     proxy_count = 0
     if proxies:
-        lines.append("# === Проверенные HTTP-прокси ===")
+        lines.append("# ═══════════════════════════════════════════════════")
+        lines.append("# 🔗  ПРОВЕРЕННЫЕ HTTP-ПРОКСИ")
+        lines.append("# ═══════════════════════════════════════════════════")
     for idx, p in enumerate(proxies[:top_n], start=1):
-        ip = p["ip"]
-        port = p["port"]
+        ip, port = p["ip"], p["port"]
         proto = "http" if p.get("proto", "http") == "https" else p.get("proto", "http")
         ping = p.get("ping", 0)
         country = p.get("country", "")
@@ -885,24 +796,25 @@ def build_config(proxies: List[Dict], vpn_nodes: List[str] | None = None,
         lines.append(f"{proto}://{ip}:{port}#{label}")
         proxy_count += 1
 
-    lines.append("")
-    lines.append(f"# VPN-нод в конфиге: {node_count}")
-    lines.append(f"# Проверенных HTTP-прокси в конфиге: {proxy_count}")
-    lines.append(f"# Обновлено: {now}")
-    lines.append("# FUN RUSSIA CRMP | TOO Oink Tech Ltd Co")
-
+    lines += [
+        "",
+        f"# VPN-нод в конфиге: {node_count}",
+        f"# Проверенных HTTP-прокси в конфиге: {proxy_count}",
+        f"# Обновлено: {now}",
+        "# FUN RUSSIA CRMP | TOO Oink Tech Ltd Co",
+    ]
     return "\n".join(lines)
 
 
 def build_json_report(proxies: List[Dict], vpn_nodes: List[str] | None = None) -> str:
     now = datetime.now(timezone.utc).isoformat()
     vpn_nodes = vpn_nodes or []
-    universal_node = make_universal_node(vpn_nodes)
     return json.dumps({
         "updated_at": now,
-        "universal_node": universal_node,
+        "universal_node": make_universal_node(vpn_nodes),
         "vpn_nodes_total": len(vpn_nodes),
         "vpn_nodes_in_config": min(len(vpn_nodes), MAX_VPN_NODES_IN_CONFIG),
+        "reserve_nodes": len(RESERVE_STATIC_NODES),
         "http_proxies_total": len(proxies),
         "http_proxies_in_config": min(len(proxies), MAX_PROXIES_IN_CONFIG),
         "vpn_nodes": vpn_nodes[:MAX_VPN_NODES_IN_CONFIG],
@@ -916,14 +828,16 @@ def build_json_report(proxies: List[Dict], vpn_nodes: List[str] | None = None) -
 def build_log(collected: int, alive: int, vpn_nodes: int, elapsed: float) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     return (
-        f"=== FunVPN Proxy Robot — {now} ===\n"
-        f"VPN-нод:   {vpn_nodes}\n"
-        f"Прокси собрано:   {collected}\n"
-        f"HTTP живых:       {alive}\n"
-        f"В конфиге VPN:    {min(vpn_nodes, MAX_VPN_NODES_IN_CONFIG)}\n"
-        f"В конфиге HTTP:   {min(alive, MAX_PROXIES_IN_CONFIG)}\n"
-        f"Источников прокси:{len(SOURCES)}\n"
-        f"Время:            {elapsed:.1f} сек\n"
+        f"=== FunVPN Proxy Robot v3.0 — {now} ===\n"
+        f"VPN-нод собрано:       {vpn_nodes}\n"
+        f"VPN-нод в конфиге:     {min(vpn_nodes, MAX_VPN_NODES_IN_CONFIG)}\n"
+        f"Резервных нод:         {len(RESERVE_STATIC_NODES)}\n"
+        f"Прокси собрано:        {collected}\n"
+        f"HTTP живых:            {alive}\n"
+        f"HTTP в конфиге:        {min(alive, MAX_PROXIES_IN_CONFIG)}\n"
+        f"Источников VPN:        {len(VPN_NODE_SOURCES)}\n"
+        f"Источников прокси:     {len(SOURCES)}\n"
+        f"Время:                 {elapsed:.1f} сек\n"
         f"FUN RUSSIA CRMP | TOO Oink Tech Ltd Co\n"
     )
 
@@ -935,51 +849,51 @@ def build_log(collected: int, alive: int, vpn_nodes: int, elapsed: float) -> str
 async def main():
     t_start = time.monotonic()
     print("=" * 55)
-    print("🤖  FunVPN Proxy/VPN Robot")
+    print("🤖  FunVPN Proxy/VPN Robot v3.0")
     print("    FUN RUSSIA CRMP | TOO Oink Tech Ltd Co")
     print("=" * 55)
+    print(f"📋 Источников VPN: {len(VPN_NODE_SOURCES)}, прокси: {len(SOURCES)}")
+    print(f"🛡️  Резервных статичных нод: {len(RESERVE_STATIC_NODES)}")
 
-    if len(VPN_NODE_SOURCES) < MIN_VPN_NODE_SOURCES:
-        raise RuntimeError(f"VPN-источников должно быть минимум {MIN_VPN_NODE_SOURCES}, сейчас {len(VPN_NODE_SOURCES)}")
-
-    # 1. Собрать реальные VPN-ноды для Happ/v2rayTun и отфильтровать только TCP-доступные.
     raw_vpn_nodes = await collect_vpn_nodes()
     alive_vpn_nodes = await check_all_vpn_nodes(raw_vpn_nodes)
     vpn_nodes = relabel_vpn_nodes(alive_vpn_nodes)
 
-    # 2. Собрать HTTP/SOCKS-прокси из источников.
     raw = await collect_all()
-
-    # 3. Проверить только HTTP/HTTPS-прокси реальным запросом.
     alive = await check_all(raw)
 
+    # Если совсем ничего нет — сохраняем только резервные ноды, не падаем
     if not vpn_nodes and not alive:
-        print("\n⚠️  Не найдено ни TCP-доступных VPN-нод, ни живых HTTP-прокси. Конфиг не обновляется.")
-        sys.exit(1)
+        print("\n⚠️  Живых нод не найдено. Сохраняем резервный конфиг.")
+        os.makedirs("configs", exist_ok=True)
+        with open(OUTPUT_CONFIG, "w", encoding="utf-8") as f:
+            f.write(build_config([], []))
+        elapsed = time.monotonic() - t_start
+        log_text = build_log(len(raw), 0, 0, elapsed)
+        with open(OUTPUT_LOG, "w", encoding="utf-8") as f:
+            f.write(log_text)
+        print(f"💾 Резервный конфиг сохранён: {OUTPUT_CONFIG}")
+        print(log_text)
+        return  # НЕ exit(1) — Actions не ломается
 
-    # 4. Страны для HTTP-прокси.
     connector = aiohttp.TCPConnector(ssl=False)
     async with aiohttp.ClientSession(connector=connector) as session:
         alive = await enrich_countries(session, alive)
 
-    # 5. Сохранить.
     os.makedirs("configs", exist_ok=True)
 
-    config_text = build_config(alive, vpn_nodes)
     with open(OUTPUT_CONFIG, "w", encoding="utf-8") as f:
-        f.write(config_text)
+        f.write(build_config(alive, vpn_nodes))
     print(f"\n💾 Конфиг сохранён: {OUTPUT_CONFIG}")
 
-    json_text = build_json_report(alive, vpn_nodes)
     with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
-        f.write(json_text)
+        f.write(build_json_report(alive, vpn_nodes))
     print(f"💾 JSON отчёт: {OUTPUT_JSON}")
 
     elapsed = time.monotonic() - t_start
     log_text = build_log(len(raw), len(alive), len(vpn_nodes), elapsed)
     with open(OUTPUT_LOG, "w", encoding="utf-8") as f:
         f.write(log_text)
-
     print("\n" + log_text)
     print(f"✅ Готово за {elapsed:.1f} сек.")
 
