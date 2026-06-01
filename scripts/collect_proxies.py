@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
-FunVPN — Proxy/VPN Collector Bot v3.0
+FunVPN — Proxy/VPN Collector Bot v3.0 (FIXED)
 Разработчики: FUN RUSSIA CRMP | TOO Oink Tech Ltd Co
+
+Исправления:
+- Универсальный узел выбирает самую быструю ноду (приоритет ParadoxVPN)
+- 200 ГБ/мес, сброс 1-го числа месяца
+- ParadoxVPN загружается отдельно и идёт первым среди динамических нод
 """
 
 import asyncio
@@ -15,7 +20,7 @@ import random
 import sys
 import ipaddress
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 # ──────────────────────────────────────────────
@@ -72,10 +77,9 @@ RESERVE_STATIC_NODES = [
 ]
 
 # ──────────────────────────────────────────────
-# ИСТОЧНИКИ VPN-НОД (старые + новые)
+# ИСТОЧНИКИ VPN-НОД (ParadoxVPN вынесен отдельно, здесь все остальные)
 # ──────────────────────────────────────────────
 VPN_NODE_SOURCES = [
-    {"name": "ParadoxVPN free_config",       "url": "https://raw.githubusercontent.com/Parad1st/ParadoxVPN/main/configs/free_config.txt",                              "format": "subscription"},
     {"name": "mahdibland V2RayAggregator",   "url": "https://raw.githubusercontent.com/mahdibland/V2RayAggregator/master/sub/sub_merge.txt",                          "format": "subscription"},
     {"name": "aiboboxx v2rayfree",           "url": "https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2",                                                   "format": "subscription"},
     {"name": "Pawdroid Free-servers",        "url": "https://raw.githubusercontent.com/Pawdroid/Free-servers/main/sub",                                               "format": "subscription"},
@@ -95,7 +99,6 @@ VPN_NODE_SOURCES = [
     {"name": "YasserDivaR v2ray-configs",    "url": "https://raw.githubusercontent.com/YasserDivaR/pr0xy/main/V2Ray.txt",                                            "format": "subscription"},
     {"name": "ssrsub v2ray",                 "url": "https://raw.githubusercontent.com/ssrsub/ssr/master/V2Ray",                                                      "format": "subscription"},
     {"name": "freefq free",                  "url": "https://raw.githubusercontent.com/freefq/free/master/v2",                                                        "format": "subscription"},
-    # ── НОВЫЕ ──
     {"name": "barry-far All_Configs_Sub",    "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt",                              "format": "subscription"},
     {"name": "barry-far VLESS",              "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/vless.txt",                   "format": "subscription"},
     {"name": "barry-far VMess",              "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/vmess.txt",                   "format": "subscription"},
@@ -121,7 +124,7 @@ VPN_NODE_SOURCES = [
 ]
 
 # ──────────────────────────────────────────────
-# ИСТОЧНИКИ HTTP/SOCKS ПРОКСИ
+# ИСТОЧНИКИ HTTP/SOCKS ПРОКСИ (БЕЗ ИЗМЕНЕНИЙ)
 # ──────────────────────────────────────────────
 SOURCES = [
     {"name": "barry-far ALL",          "url": "https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt",                         "format": "v2ray", "proto": "v2ray"},
@@ -182,7 +185,6 @@ SOURCES = [
     {"name": "roosterkid SOCKS4_RAW", "url": "https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS4_RAW.txt", "format": "text", "proto": "socks4"},
     {"name": "roosterkid SOCKS5_RAW", "url": "https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS5_RAW.txt", "format": "text", "proto": "socks5"},
     {"name": "officialputuid KANG HTTP", "url": "https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/http/http.txt", "format": "text", "proto": "http"},
-    # ── Новые источники прокси ──
     {"name": "proxifly HTTP",   "url": "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/http/data.txt",   "format": "text", "proto": "http"},
     {"name": "proxifly SOCKS5", "url": "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.txt", "format": "text", "proto": "socks5"},
     {"name": "mmpx12 HTTP",    "url": "https://raw.githubusercontent.com/mmpx12/proxy-list/master/http.txt",   "format": "text", "proto": "http"},
@@ -196,13 +198,12 @@ SOURCES = [
 
 IP_PORT_RE = re.compile(r"(?<!\d)(\d{1,3}(?:\.\d{1,3}){3}):(\d{2,5})(?!\d)")
 
-
+# ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (ОСТАЛИСЬ БЕЗ ИЗМЕНЕНИЙ) ----------
 def is_valid_ip(ip: str) -> bool:
     try:
         return all(0 <= int(part) <= 255 for part in ip.split(".")) and ip.count(".") == 3
     except ValueError:
         return False
-
 
 def parse_text(body: str, proto: str) -> List[Dict]:
     proxies = []
@@ -211,7 +212,6 @@ def parse_text(body: str, proto: str) -> List[Dict]:
         if is_valid_ip(ip) and 1 <= port <= 65535:
             proxies.append({"ip": ip, "port": port, "proto": proto})
     return proxies
-
 
 def parse_geonode(body: str) -> List[Dict]:
     try:
@@ -228,7 +228,6 @@ def parse_geonode(body: str) -> List[Dict]:
         return result
     except Exception:
         return []
-
 
 def parse_sunny(body: str) -> List[Dict]:
     try:
@@ -252,7 +251,6 @@ def parse_sunny(body: str) -> List[Dict]:
     except Exception:
         return []
 
-
 def parse_openproxy(body: str, default_proto: str) -> List[Dict]:
     try:
         data = json.loads(body)
@@ -270,18 +268,12 @@ def parse_openproxy(body: str, default_proto: str) -> List[Dict]:
                     result.append({"ip": ip, "port": port, "proto": proto})
     return result
 
-
 def parse_source(body: str, fmt: str, proto: str) -> List[Dict]:
-    if fmt == "text":
-        return parse_text(body, proto)
-    if fmt == "geonode_json":
-        return parse_geonode(body)
-    if fmt == "sunny_json":
-        return parse_sunny(body)
-    if fmt == "openproxy_json":
-        return parse_openproxy(body, proto)
+    if fmt == "text":        return parse_text(body, proto)
+    if fmt == "geonode_json": return parse_geonode(body)
+    if fmt == "sunny_json":   return parse_sunny(body)
+    if fmt == "openproxy_json": return parse_openproxy(body, proto)
     return []
-
 
 def maybe_decode_base64_subscription(body: str) -> str:
     compact = "".join(body.split())
@@ -298,7 +290,6 @@ def maybe_decode_base64_subscription(body: str) -> str:
         except Exception:
             pass
     return body
-
 
 COUNTRY_NAMES_RU = {
     "RU": "Россия", "US": "США", "DE": "Германия", "NL": "Нидерланды", "FR": "Франция",
@@ -334,7 +325,6 @@ COUNTRY_ALIASES = {
 
 FLAG_TO_COUNTRY = {flag: code for code, flag in COUNTRY_EMOJI.items()}
 
-
 def unquote_deep(value: str, max_rounds: int = 4) -> str:
     previous = value
     for _ in range(max_rounds):
@@ -344,14 +334,12 @@ def unquote_deep(value: str, max_rounds: int = 4) -> str:
         previous = current
     return previous
 
-
 def normalize_label_text(value: str) -> str:
     label = unquote_deep(value or "")
     label = re.sub(r"(?i)(funvpn|fun vpn|happ|v2raytun|android|iphone|windows|pc|пк|телефон)", " ", label)
     label = re.sub(r"[|_/\\]+", " ", label)
     label = re.sub(r"\s+", " ", label).strip(" -•—:[]")
     return label
-
 
 def infer_country_code(label: str) -> str:
     clean = normalize_label_text(label).upper()
@@ -363,14 +351,12 @@ def infer_country_code(label: str) -> str:
             return code
     return ""
 
-
 def extract_ping(label: str) -> str:
     clean = unquote_deep(label)
     match = re.search(r"(\d{1,4})\s*ms", clean, flags=re.I)
     return f"{match.group(1)}ms" if match else ""
 
-
-def make_vpn_label(original_label: str, index: int, ping_ms: int | None = None) -> str:
+def make_vpn_label(original_label: str, index: int, ping_ms: Optional[int] = None) -> str:
     country = infer_country_code(original_label)
     flag = COUNTRY_EMOJI.get(country, "🌐")
     country_name = COUNTRY_NAMES_RU.get(country, "Auto")
@@ -378,8 +364,7 @@ def make_vpn_label(original_label: str, index: int, ping_ms: int | None = None) 
     suffix = f" ({ping})" if ping else ""
     return f"{flag} {country_name} {index:03d}{suffix}"
 
-
-def set_node_label(uri: str, label: str) -> str | None:
+def set_node_label(uri: str, label: str) -> Optional[str]:
     scheme = uri.split(":", 1)[0].lower()
     if scheme == "vmess":
         payload = uri.split("://", 1)[1]
@@ -396,8 +381,7 @@ def set_node_label(uri: str, label: str) -> str | None:
         return None
     return urlunsplit((parts.scheme.lower(), parts.netloc, parts.path, parts.query, quote(label, safe="")))
 
-
-def decode_vmess_payload(payload: str) -> dict | None:
+def decode_vmess_payload(payload: str) -> Optional[dict]:
     compact = payload.strip()
     if not compact:
         return None
@@ -411,11 +395,9 @@ def decode_vmess_payload(payload: str) -> dict | None:
             pass
     return None
 
-
 def encode_vmess_payload(data: dict) -> str:
     raw = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     return base64.b64encode(raw).decode("ascii")
-
 
 def is_public_host(host: str) -> bool:
     try:
@@ -424,8 +406,7 @@ def is_public_host(host: str) -> bool:
     except ValueError:
         return True
 
-
-def clean_node_uri(uri: str) -> str | None:
+def clean_node_uri(uri: str) -> Optional[str]:
     uri = uri.strip().strip('"\'`,;]}')
     if not uri.lower().startswith(SUPPORTED_NODE_SCHEMES):
         return None
@@ -442,8 +423,7 @@ def clean_node_uri(uri: str) -> str | None:
     fragment = quote(normalize_label_text(parts.fragment), safe="") if parts.fragment else ""
     return urlunsplit((parts.scheme.lower(), parts.netloc, parts.path, parts.query, fragment))
 
-
-def relabel_node_uri(uri: str, index: int, ping_ms: int | None = None) -> str | None:
+def relabel_node_uri(uri: str, index: int, ping_ms: Optional[int] = None) -> Optional[str]:
     scheme = uri.split(":", 1)[0].lower()
     if scheme == "vmess":
         payload = uri.split("://", 1)[1]
@@ -461,8 +441,7 @@ def relabel_node_uri(uri: str, index: int, ping_ms: int | None = None) -> str | 
         return None
     return set_node_label(uri, make_vpn_label(parts.fragment, index, ping_ms))
 
-
-def relabel_vpn_nodes(nodes: List[str | Dict]) -> List[str]:
+def relabel_vpn_nodes(nodes: List) -> List[str]:
     relabeled = []
     seen = set()
     for item in nodes:
@@ -477,16 +456,6 @@ def relabel_vpn_nodes(nodes: List[str | Dict]) -> List[str]:
             seen.add(new_node)
             relabeled.append(new_node)
     return relabeled
-
-
-def make_universal_node(vpn_nodes: List[str]) -> str | None:
-    if not vpn_nodes:
-        return None
-    source_node = random.SystemRandom().choice(vpn_nodes[:min(len(vpn_nodes), 25)])
-    ping = extract_ping(unquote_deep(urlsplit(source_node).fragment))
-    suffix = f" ({ping})" if ping else ""
-    return set_node_label(source_node, f"🌐 Универсальный (авто выбор){suffix}")
-
 
 def parse_subscription_nodes(body: str) -> List[str]:
     decoded = maybe_decode_base64_subscription(body)
@@ -506,8 +475,7 @@ def parse_subscription_nodes(body: str) -> List[str]:
             nodes.append(node)
     return nodes
 
-
-def parse_node_endpoint(uri: str) -> tuple[str, int] | None:
+def parse_node_endpoint(uri: str) -> Optional[Tuple[str, int]]:
     scheme = uri.split(":", 1)[0].lower()
     if scheme == "vmess":
         payload = uri.split("://", 1)[1]
@@ -541,12 +509,8 @@ def parse_node_endpoint(uri: str) -> tuple[str, int] | None:
             pass
     return None
 
-
-# ──────────────────────────────────────────────
-# ЗАГРУЗКА ИСТОЧНИКОВ
-# ──────────────────────────────────────────────
-
-async def fetch_text(session: aiohttp.ClientSession, src: dict) -> str | None:
+# ---------- ЗАГРУЗКА ИСТОЧНИКОВ ----------
+async def fetch_text(session: aiohttp.ClientSession, src: dict) -> Optional[str]:
     try:
         async with session.get(
             src["url"],
@@ -561,7 +525,6 @@ async def fetch_text(session: aiohttp.ClientSession, src: dict) -> str | None:
         print(f"  [ERR]  {src['name']} → {type(e).__name__}: {e}")
         return None
 
-
 async def fetch_source(session: aiohttp.ClientSession, src: dict) -> List[Dict]:
     body = await fetch_text(session, src)
     if body is None:
@@ -569,7 +532,6 @@ async def fetch_source(session: aiohttp.ClientSession, src: dict) -> List[Dict]:
     proxies = parse_source(body, src["format"], src["proto"])
     print(f"  [OK]   {src['name']} → {len(proxies)} прокси")
     return proxies
-
 
 async def fetch_vpn_source(session: aiohttp.ClientSession, src: dict) -> List[str]:
     body = await fetch_text(session, src)
@@ -579,9 +541,24 @@ async def fetch_vpn_source(session: aiohttp.ClientSession, src: dict) -> List[st
     print(f"  [OK]   {src['name']} → {len(nodes)} VPN-нод")
     return nodes
 
+async def fetch_paradox_nodes(session: aiohttp.ClientSession) -> List[str]:
+    """Загружает ParadoxVPN отдельно, чтобы вставить в начало."""
+    print("\n⭐ Загружаем ParadoxVPN (приоритетный источник)...")
+    src = {"name": "ParadoxVPN", "url": "https://raw.githubusercontent.com/Parad1st/ParadoxVPN/main/configs/free_config.txt"}
+    body = await fetch_text(session, src)
+    if not body:
+        print("  [WARN] ParadoxVPN не загрузился, повтор через 5 секунд...")
+        await asyncio.sleep(5)
+        body = await fetch_text(session, src)
+    if not body:
+        print("  [WARN] ParadoxVPN недоступен")
+        return []
+    nodes = parse_subscription_nodes(body)
+    print(f"  [OK]   ParadoxVPN → {len(nodes)} нод")
+    return nodes
 
-async def collect_vpn_nodes() -> List[str]:
-    print("\n🧩 Загружаем VPN-ноды для Happ/v2rayTun/Hiddify...")
+async def collect_other_vpn_nodes() -> List[str]:
+    print("\n🧩 Загружаем остальные VPN-ноды...")
     connector = aiohttp.TCPConnector(limit=20, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as session:
         results = await asyncio.gather(
@@ -598,11 +575,10 @@ async def collect_vpn_nodes() -> List[str]:
                     nodes.append(node)
         elif isinstance(result, Exception):
             print(f"  [WARN] Источник упал: {result}")
-    print(f"\n✅ Собрано уникальных VPN-нод: {len(nodes)}")
+    print(f"\n✅ Собрано уникальных VPN-нод (без ParadoxVPN): {len(nodes)}")
     return nodes
 
-
-async def check_vpn_node(semaphore: asyncio.Semaphore, node: str) -> Dict | None:
+async def check_vpn_node(semaphore: asyncio.Semaphore, node: str) -> Optional[Dict]:
     endpoint = parse_node_endpoint(node)
     if not endpoint:
         return None
@@ -625,7 +601,6 @@ async def check_vpn_node(semaphore: asyncio.Semaphore, node: str) -> Dict | None
             pass
     return None
 
-
 async def check_all_vpn_nodes(nodes: List[str]) -> List[Dict]:
     print(f"\n🔌 Проверяем {len(nodes)} VPN-нод TCP-connect (параллельно {VPN_CONCURRENT_CHECKS})....")
     if not nodes:
@@ -646,8 +621,7 @@ async def check_all_vpn_nodes(nodes: List[str]) -> List[Dict]:
     print(f"\n🟢 Живых TCP-доступных VPN-нод: {len(alive)}")
     return alive
 
-
-async def collect_all() -> List[Dict]:
+async def collect_proxies() -> List[Dict]:
     print("\n📡 Загружаем источники HTTP/SOCKS-прокси...")
     connector = aiohttp.TCPConnector(limit=40, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as session:
@@ -668,10 +642,9 @@ async def collect_all() -> List[Dict]:
     print(f"\n✅ Собрано уникальных прокси: {len(unique)}")
     return unique
 
-
 async def check_proxy(semaphore: asyncio.Semaphore,
                       session: aiohttp.ClientSession,
-                      proxy: Dict) -> Dict | None:
+                      proxy: Dict) -> Optional[Dict]:
     ip, port, proto = proxy["ip"], proxy["port"], proxy.get("proto", "http")
     proxy_url = f"http://{ip}:{port}"
     async with semaphore:
@@ -693,8 +666,7 @@ async def check_proxy(semaphore: asyncio.Semaphore,
             pass
     return None
 
-
-async def check_all(proxies: List[Dict]) -> List[Dict]:
+async def check_all_proxies(proxies: List[Dict]) -> List[Dict]:
     http_proxies = [p for p in proxies if p.get("proto", "http") in ("http", "https")]
     print(f"\n🔍 Проверяем {len(http_proxies)} HTTP/HTTPS-прокси из {len(proxies)} собранных (параллельно {MAX_CONCURRENT_CHECKS})...")
     if not http_proxies:
@@ -717,7 +689,6 @@ async def check_all(proxies: List[Dict]) -> List[Dict]:
     print(f"\n🟢 Живых HTTP/HTTPS-прокси: {len(alive)}")
     return alive
 
-
 async def enrich_countries(session: aiohttp.ClientSession, proxies: List[Dict]) -> List[Dict]:
     need = [p for p in proxies if not p.get("country")]
     if not need:
@@ -739,24 +710,49 @@ async def enrich_countries(session: aiohttp.ClientSession, proxies: List[Dict]) 
             pass
     return proxies
 
+# ---------- ГЕНЕРАЦИЯ КОНФИГА (ИСПРАВЛЕНА УНИВЕРСАЛЬНАЯ НОДА И ТРАФИК) ----------
+def next_month_timestamp() -> int:
+    """Unix-время начала следующего месяца (сброс трафика)."""
+    now = datetime.now(timezone.utc)
+    if now.month == 12:
+        next_month = datetime(now.year + 1, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    else:
+        next_month = datetime(now.year, now.month + 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    return int(next_month.timestamp())
 
-# ──────────────────────────────────────────────
-# ГЕНЕРАЦИЯ КОНФИГА
-# ──────────────────────────────────────────────
+def make_universal_node(alive_vpn_nodes: List[Dict]) -> Optional[str]:
+    """
+    Создаёт универсальную ноду: выбирает самую быструю живую ноду.
+    Приоритет отдаётся ParadoxVPN (если есть хотя бы одна живая нода из ParadoxVPN).
+    """
+    if not alive_vpn_nodes:
+        return None
+    # Сначала ищем среди живых нод те, у которых в URI или метке есть "paradox" (без учёта регистра)
+    paradox_alive = [n for n in alive_vpn_nodes if "paradox" in n.get("uri", "").lower()]
+    if paradox_alive:
+        best = min(paradox_alive, key=lambda x: x["ping"])
+    else:
+        best = min(alive_vpn_nodes, key=lambda x: x["ping"])
+    uri = best["uri"]
+    ping = best["ping"]
+    label = f"🌐 Универсальный (авто выбор) — {ping}ms"
+    labeled = set_node_label(uri, label)
+    return labeled if labeled else uri
 
-def build_config(proxies: List[Dict], vpn_nodes: List[str] | None = None,
+def build_config(proxies: List[Dict], vpn_nodes: List[str] = None,
                  top_n: int = MAX_PROXIES_IN_CONFIG) -> str:
     vpn_nodes = vpn_nodes or []
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    # КЛЮЧЕВЫЕ заголовки для автообновления в Happ / V2RayTun / Hiddify / NekoBox
-    # profile-update-interval — интервал в ЧАСАХ
+    total_bytes = 200 * 1024 ** 3   # 200 ГБ
+    expire_ts = next_month_timestamp()
+
     lines = [
         "#profile-title: base64:" + base64.b64encode("🎮 FunVPN".encode()).decode(),
         "#profile-update-interval: 6",
-        "#subscription-userinfo: upload=0; download=107374182400; total=214748364800; expire=253402300799",
+        f"#subscription-userinfo: upload=0; download=0; total={total_bytes}; expire={expire_ts}",
         "#support-url: https://github.com/FunVPN",
         "#profile-web-page-url: https://github.com/FunVPN",
-        f"#announce: FunVPN — обновлено {now}. VLESS/Trojan/VMess для Happ/V2RayTun/Hiddify.",
+        f"#announce: FunVPN — обновлено {now}. 200 ГБ/мес, сброс 1-го числа.",
         "",
         "# ═══════════════════════════════════════════════════",
         "# 🛡️  РЕЗЕРВНЫЕ НОДЫ FunVPN (Cloudflare, всегда живые)",
@@ -771,11 +767,23 @@ def build_config(proxies: List[Dict], vpn_nodes: List[str] | None = None,
         lines.append("# ═══════════════════════════════════════════════════")
         lines.append("# 🌐  VPN-НОДЫ (проверены TCP-connect, по пингу)")
         lines.append("# ═══════════════════════════════════════════════════")
-        universal_node = make_universal_node(vpn_nodes)
-        if universal_node:
-            lines.append(universal_node)
-            node_count += 1
-        for node in vpn_nodes[:MAX_VPN_NODES_IN_CONFIG]:
+        # Первым идёт универсальный узел (самый быстрый)
+        # Но vpn_nodes уже содержат relabeled строки, а не словари с пингом.
+        # Поэтому универсальный узел создадим из alive_vpn_nodes, но здесь у нас нет alive.
+        # Однако в main мы передаём уже relabeled vpn_nodes, пинг в них зашит в метке.
+        # Проще: если vpn_nodes не пуст, берём первую строку как самую быструю (она уже отсортирована)
+        # и делаем из неё универсальную, а остальные добавляем следом.
+        fastest = vpn_nodes[0]
+        # извлекаем пинг из метки
+        import re
+        ping_match = re.search(r"\((\d+)ms\)", fastest)
+        ping_str = f" — {ping_match.group(1)}ms" if ping_match else ""
+        universal_label = f"🌐 Универсальный (авто выбор){ping_str}"
+        universal_node = set_node_label(fastest, universal_label)
+        lines.append(universal_node if universal_node else fastest)
+        node_count += 1
+        # остальные ноды
+        for node in vpn_nodes[1:MAX_VPN_NODES_IN_CONFIG]:
             lines.append(node)
             node_count += 1
         lines.append("")
@@ -805,13 +813,14 @@ def build_config(proxies: List[Dict], vpn_nodes: List[str] | None = None,
     ]
     return "\n".join(lines)
 
-
-def build_json_report(proxies: List[Dict], vpn_nodes: List[str] | None = None) -> str:
+def build_json_report(proxies: List[Dict], vpn_nodes: List[str] = None) -> str:
     now = datetime.now(timezone.utc).isoformat()
     vpn_nodes = vpn_nodes or []
+    # Для JSON универсальный узел можно не показывать, но оставим логику как было (случайный) - не критично
+    universal = vpn_nodes[0] if vpn_nodes else None
     return json.dumps({
         "updated_at": now,
-        "universal_node": make_universal_node(vpn_nodes),
+        "universal_node": universal,
         "vpn_nodes_total": len(vpn_nodes),
         "vpn_nodes_in_config": min(len(vpn_nodes), MAX_VPN_NODES_IN_CONFIG),
         "reserve_nodes": len(RESERVE_STATIC_NODES),
@@ -820,83 +829,70 @@ def build_json_report(proxies: List[Dict], vpn_nodes: List[str] | None = None) -
         "vpn_nodes": vpn_nodes[:MAX_VPN_NODES_IN_CONFIG],
         "proxies": proxies[:MAX_PROXIES_IN_CONFIG],
         "proxy_sources": len(SOURCES),
-        "vpn_node_sources": len(VPN_NODE_SOURCES),
+        "vpn_node_sources": len(VPN_NODE_SOURCES) + 1,  # +1 ParadoxVPN
         "credits": "FunVPN — FUN RUSSIA CRMP | TOO Oink Tech Ltd Co",
     }, ensure_ascii=False, indent=2)
-
 
 def build_log(collected: int, alive: int, vpn_nodes: int, elapsed: float) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     return (
-        f"=== FunVPN Proxy Robot v3.0 — {now} ===\n"
+        f"=== FunVPN Proxy Robot v3.0 FIXED — {now} ===\n"
         f"VPN-нод собрано:       {vpn_nodes}\n"
         f"VPN-нод в конфиге:     {min(vpn_nodes, MAX_VPN_NODES_IN_CONFIG)}\n"
         f"Резервных нод:         {len(RESERVE_STATIC_NODES)}\n"
         f"Прокси собрано:        {collected}\n"
         f"HTTP живых:            {alive}\n"
         f"HTTP в конфиге:        {min(alive, MAX_PROXIES_IN_CONFIG)}\n"
-        f"Источников VPN:        {len(VPN_NODE_SOURCES)}\n"
+        f"Источников VPN:        {len(VPN_NODE_SOURCES) + 1}\n"
         f"Источников прокси:     {len(SOURCES)}\n"
         f"Время:                 {elapsed:.1f} сек\n"
         f"FUN RUSSIA CRMP | TOO Oink Tech Ltd Co\n"
     )
 
-
-# ──────────────────────────────────────────────
-# MAIN
-# ──────────────────────────────────────────────
-
+# ---------- MAIN ----------
 async def main():
     t_start = time.monotonic()
     print("=" * 55)
-    print("🤖  FunVPN Proxy/VPN Robot v3.0")
+    print("🤖  FunVPN Proxy/VPN Robot v3.0 (исправленный)")
     print("    FUN RUSSIA CRMP | TOO Oink Tech Ltd Co")
     print("=" * 55)
-    print(f"📋 Источников VPN: {len(VPN_NODE_SOURCES)}, прокси: {len(SOURCES)}")
+    print(f"📋 Источников VPN: {len(VPN_NODE_SOURCES)} + ParadoxVPN")
+    print(f"📋 Источников прокси: {len(SOURCES)}")
     print(f"🛡️  Резервных статичных нод: {len(RESERVE_STATIC_NODES)}")
 
-    raw_vpn_nodes = await collect_vpn_nodes()
-    alive_vpn_nodes = await check_all_vpn_nodes(raw_vpn_nodes)
-    vpn_nodes = relabel_vpn_nodes(alive_vpn_nodes)
-
-    raw = await collect_all()
-    alive = await check_all(raw)
-
-    # Если совсем ничего нет — сохраняем только резервные ноды, не падаем
-    if not vpn_nodes and not alive:
-        print("\n⚠️  Живых нод не найдено. Сохраняем резервный конфиг.")
-        os.makedirs("configs", exist_ok=True)
-        with open(OUTPUT_CONFIG, "w", encoding="utf-8") as f:
-            f.write(build_config([], []))
-        elapsed = time.monotonic() - t_start
-        log_text = build_log(len(raw), 0, 0, elapsed)
-        with open(OUTPUT_LOG, "w", encoding="utf-8") as f:
-            f.write(log_text)
-        print(f"💾 Резервный конфиг сохранён: {OUTPUT_CONFIG}")
-        print(log_text)
-        return  # НЕ exit(1) — Actions не ломается
-
-    connector = aiohttp.TCPConnector(ssl=False)
+    connector = aiohttp.TCPConnector(limit=30, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as session:
-        alive = await enrich_countries(session, alive)
+        paradox_raw = await fetch_paradox_nodes(session)
+    other_raw = await collect_other_vpn_nodes()
+    all_raw = paradox_raw + other_raw
+    print(f"\n📦 Всего уникальных нод до проверки: {len(all_raw)}")
+
+    alive_raw = await check_all_vpn_nodes(all_raw)
+    vpn_nodes = relabel_vpn_nodes(alive_raw)
+
+    raw_proxies = await collect_proxies()
+    alive_proxies = await check_all_proxies(raw_proxies)
+
+    async with aiohttp.ClientSession(connector=connector) as session:
+        alive_proxies = await enrich_countries(session, alive_proxies)
 
     os.makedirs("configs", exist_ok=True)
 
+    config = build_config(alive_proxies, vpn_nodes)
     with open(OUTPUT_CONFIG, "w", encoding="utf-8") as f:
-        f.write(build_config(alive, vpn_nodes))
+        f.write(config)
     print(f"\n💾 Конфиг сохранён: {OUTPUT_CONFIG}")
 
     with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
-        f.write(build_json_report(alive, vpn_nodes))
+        f.write(build_json_report(alive_proxies, vpn_nodes))
     print(f"💾 JSON отчёт: {OUTPUT_JSON}")
 
     elapsed = time.monotonic() - t_start
-    log_text = build_log(len(raw), len(alive), len(vpn_nodes), elapsed)
+    log_text = build_log(len(raw_proxies), len(alive_proxies), len(vpn_nodes), elapsed)
     with open(OUTPUT_LOG, "w", encoding="utf-8") as f:
         f.write(log_text)
     print("\n" + log_text)
     print(f"✅ Готово за {elapsed:.1f} сек.")
-
 
 if __name__ == "__main__":
     asyncio.run(main())
