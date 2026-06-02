@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
 """
-FunVPN — Proxy/VPN Collector Bot v3.0 (Self-Healing)
+FunVPN — Proxy/VPN Collector Bot v3.0
 Разработчики: FUN RUSSIA CRMP | TOO Oink Tech Ltd Co
-
-Добавлено:
-- Автоматический поиск новых источников (GitHub, Telegram)
-- Универсальный узел теперь выбирает самую быструю ноду (приоритет ParadoxVPN)
-- 200 ГБ трафика с ежемесячным сбросом 1-го числа
 """
 
 import asyncio
@@ -20,7 +15,7 @@ import random
 import sys
 import ipaddress
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 # ──────────────────────────────────────────────
@@ -43,21 +38,6 @@ OUTPUT_LOG    = "configs/last_update.log"
 
 SUPPORTED_NODE_SCHEMES = ("vless://", "vmess://", "trojan://", "ss://", "ssr://")
 PROXY_SCHEMES = ("http", "https", "socks4", "socks5")
-
-# Параметры поискового робота
-GITHUB_SEARCH_QUERIES = [
-    "v2ray free config",
-    "vless subscription",
-    "vmess free nodes",
-    "trojan free servers",
-    "бесплатные vless ноды",
-    "free v2ray servers list"
-]
-TELEGRAM_CHANNELS = [
-    "https://t.me/s/abc_configs",
-    "https://t.me/s/vpngate_updates",
-    "https://t.me/s/free_v2ray_configs"
-]
 
 COUNTRY_EMOJI = {
     "RU":"🇷🇺","US":"🇺🇸","DE":"🇩🇪","NL":"🇳🇱","FR":"🇫🇷",
@@ -99,10 +79,11 @@ RESERVE_STATIC_NODES = [
     "trojan://telegram-id-directvpn@13.37.87.172:22222?security=tls&type=tcp&headerType=none&sni=trojan.burgerip.net#%F0%9F%9B%A1%EF%B8%8F%20Reserve-FR-8",
     "vless://7de47379-76ef-4b9b-a8c5-ad60ee9826e2@104.21.90.187:80?path=%2Fvless&security=none&encryption=none&host=vl.shoppingtoday.co&type=ws#%F0%9F%9B%A1%EF%B8%8F%20Reserve-CF-9",
     "vless://d342d11e-d424-4583-b36e-524ab1f0afa4@172.64.146.144:443?security=tls&encryption=none&host=jrsis.ir&type=ws&path=%2Fvless&sni=jrsis.ir#%F0%9F%9B%A1%EF%B8%8F%20Reserve-CF-10",
+
 ]
 
 # ──────────────────────────────────────────────
-# ИСТОЧНИКИ VPN-НОД (старые + новые) — ВСЕ ТВОИ
+# ИСТОЧНИКИ VPN-НОД (старые + новые)
 # ──────────────────────────────────────────────
 VPN_NODE_SOURCES = [
     {"name": "ParadoxVPN free_config",       "url": "https://raw.githubusercontent.com/Parad1st/ParadoxVPN/main/configs/free_config.txt",                              "format": "subscription"},
@@ -218,7 +199,7 @@ VPN_NODE_SOURCES = [
 ]
 
 # ──────────────────────────────────────────────
-# ИСТОЧНИКИ HTTP/SOCKS ПРОКСИ (все твои)
+# ИСТОЧНИКИ HTTP/SOCKS ПРОКСИ
 # ──────────────────────────────────────────────
 SOURCES = [
     {"name": "ProxyScrape HTTP",   "url": "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=http&timeout=5000&country=all&ssl=all&anonymity=all",  "format": "text", "proto": "http"},
@@ -312,12 +293,13 @@ SOURCES = [
 
 IP_PORT_RE = re.compile(r"(?<!\d)(\d{1,3}(?:\.\d{1,3}){3}):(\d{2,5})(?!\d)")
 
-# ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (все твои, без изменений) ----------
+
 def is_valid_ip(ip: str) -> bool:
     try:
         return all(0 <= int(part) <= 255 for part in ip.split(".")) and ip.count(".") == 3
     except ValueError:
         return False
+
 
 def parse_text(body: str, proto: str) -> List[Dict]:
     proxies = []
@@ -326,6 +308,7 @@ def parse_text(body: str, proto: str) -> List[Dict]:
         if is_valid_ip(ip) and 1 <= port <= 65535:
             proxies.append({"ip": ip, "port": port, "proto": proto})
     return proxies
+
 
 def parse_geonode(body: str) -> List[Dict]:
     try:
@@ -342,6 +325,7 @@ def parse_geonode(body: str) -> List[Dict]:
         return result
     except Exception:
         return []
+
 
 def parse_sunny(body: str) -> List[Dict]:
     try:
@@ -365,6 +349,7 @@ def parse_sunny(body: str) -> List[Dict]:
     except Exception:
         return []
 
+
 def parse_openproxy(body: str, default_proto: str) -> List[Dict]:
     try:
         data = json.loads(body)
@@ -382,6 +367,7 @@ def parse_openproxy(body: str, default_proto: str) -> List[Dict]:
                     result.append({"ip": ip, "port": port, "proto": proto})
     return result
 
+
 def parse_source(body: str, fmt: str, proto: str) -> List[Dict]:
     if fmt == "text":
         return parse_text(body, proto)
@@ -392,6 +378,7 @@ def parse_source(body: str, fmt: str, proto: str) -> List[Dict]:
     if fmt == "openproxy_json":
         return parse_openproxy(body, proto)
     return []
+
 
 def maybe_decode_base64_subscription(body: str) -> str:
     compact = "".join(body.split())
@@ -408,6 +395,7 @@ def maybe_decode_base64_subscription(body: str) -> str:
         except Exception:
             pass
     return body
+
 
 COUNTRY_NAMES_RU = {
     "RU": "Россия", "US": "США", "DE": "Германия", "NL": "Нидерланды", "FR": "Франция",
@@ -443,6 +431,7 @@ COUNTRY_ALIASES = {
 
 FLAG_TO_COUNTRY = {flag: code for code, flag in COUNTRY_EMOJI.items()}
 
+
 def unquote_deep(value: str, max_rounds: int = 4) -> str:
     previous = value
     for _ in range(max_rounds):
@@ -452,12 +441,14 @@ def unquote_deep(value: str, max_rounds: int = 4) -> str:
         previous = current
     return previous
 
+
 def normalize_label_text(value: str) -> str:
     label = unquote_deep(value or "")
     label = re.sub(r"(?i)(funvpn|fun vpn|happ|v2raytun|android|iphone|windows|pc|пк|телефон)", " ", label)
     label = re.sub(r"[|_/\\]+", " ", label)
     label = re.sub(r"\s+", " ", label).strip(" -•—:[]")
     return label
+
 
 def infer_country_code(label: str) -> str:
     clean = normalize_label_text(label).upper()
@@ -469,12 +460,14 @@ def infer_country_code(label: str) -> str:
             return code
     return ""
 
+
 def extract_ping(label: str) -> str:
     clean = unquote_deep(label)
     match = re.search(r"(\d{1,4})\s*ms", clean, flags=re.I)
     return f"{match.group(1)}ms" if match else ""
 
-def make_vpn_label(original_label: str, index: int, ping_ms: Optional[int] = None) -> str:
+
+def make_vpn_label(original_label: str, index: int, ping_ms: int | None = None) -> str:
     country = infer_country_code(original_label)
     flag = COUNTRY_EMOJI.get(country, "🌐")
     country_name = COUNTRY_NAMES_RU.get(country, "Auto")
@@ -482,7 +475,8 @@ def make_vpn_label(original_label: str, index: int, ping_ms: Optional[int] = Non
     suffix = f" ({ping})" if ping else ""
     return f"{flag} {country_name} {index:03d}{suffix}"
 
-def set_node_label(uri: str, label: str) -> Optional[str]:
+
+def set_node_label(uri: str, label: str) -> str | None:
     scheme = uri.split(":", 1)[0].lower()
     if scheme == "vmess":
         payload = uri.split("://", 1)[1]
@@ -499,7 +493,8 @@ def set_node_label(uri: str, label: str) -> Optional[str]:
         return None
     return urlunsplit((parts.scheme.lower(), parts.netloc, parts.path, parts.query, quote(label, safe="")))
 
-def decode_vmess_payload(payload: str) -> Optional[dict]:
+
+def decode_vmess_payload(payload: str) -> dict | None:
     compact = payload.strip()
     if not compact:
         return None
@@ -513,9 +508,11 @@ def decode_vmess_payload(payload: str) -> Optional[dict]:
             pass
     return None
 
+
 def encode_vmess_payload(data: dict) -> str:
     raw = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     return base64.b64encode(raw).decode("ascii")
+
 
 def is_public_host(host: str) -> bool:
     try:
@@ -524,7 +521,8 @@ def is_public_host(host: str) -> bool:
     except ValueError:
         return True
 
-def clean_node_uri(uri: str) -> Optional[str]:
+
+def clean_node_uri(uri: str) -> str | None:
     uri = uri.strip().strip('"\'`,;]}')
     if not uri.lower().startswith(SUPPORTED_NODE_SCHEMES):
         return None
@@ -541,7 +539,8 @@ def clean_node_uri(uri: str) -> Optional[str]:
     fragment = quote(normalize_label_text(parts.fragment), safe="") if parts.fragment else ""
     return urlunsplit((parts.scheme.lower(), parts.netloc, parts.path, parts.query, fragment))
 
-def relabel_node_uri(uri: str, index: int, ping_ms: Optional[int] = None) -> Optional[str]:
+
+def relabel_node_uri(uri: str, index: int, ping_ms: int | None = None) -> str | None:
     scheme = uri.split(":", 1)[0].lower()
     if scheme == "vmess":
         payload = uri.split("://", 1)[1]
@@ -559,7 +558,8 @@ def relabel_node_uri(uri: str, index: int, ping_ms: Optional[int] = None) -> Opt
         return None
     return set_node_label(uri, make_vpn_label(parts.fragment, index, ping_ms))
 
-def relabel_vpn_nodes(nodes: List) -> List[str]:
+
+def relabel_vpn_nodes(nodes: List[str | Dict]) -> List[str]:
     relabeled = []
     seen = set()
     for item in nodes:
@@ -574,6 +574,16 @@ def relabel_vpn_nodes(nodes: List) -> List[str]:
             seen.add(new_node)
             relabeled.append(new_node)
     return relabeled
+
+
+def make_universal_node(vpn_nodes: List[str]) -> str | None:
+    if not vpn_nodes:
+        return None
+    source_node = random.SystemRandom().choice(vpn_nodes[:min(len(vpn_nodes), 25)])
+    ping = extract_ping(unquote_deep(urlsplit(source_node).fragment))
+    suffix = f" ({ping})" if ping else ""
+    return set_node_label(source_node, f"🌐 Универсальный (авто выбор){suffix}")
+
 
 def parse_subscription_nodes(body: str) -> List[str]:
     decoded = maybe_decode_base64_subscription(body)
@@ -593,7 +603,8 @@ def parse_subscription_nodes(body: str) -> List[str]:
             nodes.append(node)
     return nodes
 
-def parse_node_endpoint(uri: str) -> Optional[Tuple[str, int]]:
+
+def parse_node_endpoint(uri: str) -> tuple[str, int] | None:
     scheme = uri.split(":", 1)[0].lower()
     if scheme == "vmess":
         payload = uri.split("://", 1)[1]
@@ -627,106 +638,12 @@ def parse_node_endpoint(uri: str) -> Optional[Tuple[str, int]]:
             pass
     return None
 
-# ---------- НОВЫЙ МОДУЛЬ АВТОПОИСКА ИСТОЧНИКОВ (добавлен) ----------
-async def search_github(session: aiohttp.ClientSession, query: str) -> List[str]:
-    """Ищет репозитории GitHub по ключевым словам и извлекает ссылки на конфиги."""
-    urls = []
-    search_url = f"https://api.github.com/search/repositories?q={quote(query)}+extension:txt+OR+path:README.md&sort=updated&order=desc&per_page=8"
-    headers = {"Accept": "application/vnd.github.v3+json"}
-    try:
-        async with session.get(search_url, headers=headers, timeout=15) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                for repo in data.get("items", []):
-                    repo_full = repo["full_name"]
-                    # ссылка на README
-                    raw_readme = f"https://raw.githubusercontent.com/{repo_full}/main/README.md"
-                    urls.append(raw_readme)
-                    # пробуем найти любые .txt файлы в корне
-                    contents_url = f"https://api.github.com/repos/{repo_full}/contents/"
-                    try:
-                        async with session.get(contents_url, headers=headers, timeout=10) as cont_resp:
-                            if cont_resp.status == 200:
-                                for file in await cont_resp.json():
-                                    if file.get("name", "").endswith((".txt", ".config", ".yaml", ".yml")):
-                                        urls.append(file.get("download_url", ""))
-                    except:
-                        pass
-    except Exception as e:
-        print(f"GitHub search error: {e}")
-    return urls
 
-async def parse_telegram_channel(session: aiohttp.ClientSession, channel_url: str) -> List[str]:
-    """Парсит Telegram канал на предмет ссылок на конфигурации."""
-    urls = []
-    try:
-        async with session.get(channel_url, timeout=15) as resp:
-            if resp.status == 200:
-                text = await resp.text()
-                # Ищем все ссылки на конфигурации в сообщениях
-                config_urls = re.findall(r'(?:https?://[^\s]+\.txt|https?://[^\s]+raw[^\s]+)', text)
-                urls.extend(config_urls)
-    except Exception as e:
-        print(f"Telegram channel parse error: {e}")
-    return urls
+# ──────────────────────────────────────────────
+# ЗАГРУЗКА ИСТОЧНИКОВ
+# ──────────────────────────────────────────────
 
-def extract_subscription_links(content: str) -> List[str]:
-    """Извлекает всевозможные ссылки на подписки из текстового содержимого."""
-    urls = []
-    patterns = [
-        r'https?://raw\.githubusercontent\.com/[^\s<>"\']+\.txt',
-        r'https?://[^\s<>"\']+/subscription(?:s?)/[^\s<>"\']+',
-        r'https?://[^\s<>"\']+\.txt',
-        r'https?://[^\s<>"\']+node[^\s<>"\']+',
-        r'(?:vless|vmess|trojan|ss|ssr)://[^\s<>"\']+'
-    ]
-    for pattern in patterns:
-        matches = re.findall(pattern, content)
-        urls.extend(matches)
-    return urls
-
-async def collect_dynamic_sources(session: aiohttp.ClientSession) -> List[Dict]:
-    """Собирает динамические источники (GitHub, Telegram) и возвращает список словарей с name/url/type."""
-    dynamic = []
-    print("🔎 Поиск новых источников на GitHub...")
-    github_tasks = [search_github(session, q) for q in GITHUB_SEARCH_QUERIES]
-    github_results = await asyncio.gather(*github_tasks, return_exceptions=True)
-    for res in github_results:
-        if isinstance(res, list):
-            for url in res:
-                dynamic.append({"name": f"GitHub-Auto-{len(dynamic)}", "url": url, "format": "subscription"})
-    print("✈️ Парсинг Telegram каналов...")
-    tg_tasks = [parse_telegram_channel(session, ch) for ch in TELEGRAM_CHANNELS]
-    tg_results = await asyncio.gather(*tg_tasks, return_exceptions=True)
-    for res in tg_results:
-        if isinstance(res, list):
-            for url in res:
-                dynamic.append({"name": f"Telegram-Auto-{len(dynamic)}", "url": url, "format": "subscription"})
-    print(f"✅ Найдено динамических источников: {len(dynamic)}")
-    return dynamic
-
-async def fetch_vpn_node_from_source(session: aiohttp.ClientSession, src: dict) -> List[str]:
-    """Универсальная загрузка конфигов из источника (с поддержкой вложенных ссылок)."""
-    content = await fetch_text(session, src)
-    if not content:
-        return []
-    # Извлекаем ссылки на конфиги
-    config_links = extract_subscription_links(content)
-    nodes = []
-    for link in config_links:
-        if link.endswith(('.txt', '.config')):
-            sub_content = await fetch_text(session, {"url": link, "name": src["name"]})
-            if sub_content:
-                nodes.extend(parse_subscription_nodes(sub_content))
-        else:
-            node = clean_node_uri(link)
-            if node:
-                nodes.append(node)
-    print(f"  [OK] {src['name']} -> {len(nodes)} нод")
-    return nodes
-
-# ---------- ФУНКЦИИ ЗАГРУЗКИ (оставлены твои, но расширены) ----------
-async def fetch_text(session: aiohttp.ClientSession, src: dict) -> Optional[str]:
+async def fetch_text(session: aiohttp.ClientSession, src: dict) -> str | None:
     try:
         async with session.get(
             src["url"],
@@ -741,6 +658,7 @@ async def fetch_text(session: aiohttp.ClientSession, src: dict) -> Optional[str]
         print(f"  [ERR]  {src['name']} → {type(e).__name__}: {e}")
         return None
 
+
 async def fetch_source(session: aiohttp.ClientSession, src: dict) -> List[Dict]:
     body = await fetch_text(session, src)
     if body is None:
@@ -749,14 +667,22 @@ async def fetch_source(session: aiohttp.ClientSession, src: dict) -> List[Dict]:
     print(f"  [OK]   {src['name']} → {len(proxies)} прокси")
     return proxies
 
-async def collect_vpn_nodes(dynamic_sources: List[Dict]) -> List[str]:
-    """Собирает ноды из статических и динамических источников."""
-    all_sources = VPN_NODE_SOURCES + dynamic_sources
-    print(f"\n🧩 Загружаем VPN-ноды из {len(all_sources)} источников (статик + динамик)...")
-    connector = aiohttp.TCPConnector(limit=30, ssl=False)
+
+async def fetch_vpn_source(session: aiohttp.ClientSession, src: dict) -> List[str]:
+    body = await fetch_text(session, src)
+    if body is None:
+        return []
+    nodes = parse_subscription_nodes(body)
+    print(f"  [OK]   {src['name']} → {len(nodes)} VPN-нод")
+    return nodes
+
+
+async def collect_vpn_nodes() -> List[str]:
+    print("\n🧩 Загружаем VPN-ноды для Happ/v2rayTun/Hiddify...")
+    connector = aiohttp.TCPConnector(limit=20, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as session:
         results = await asyncio.gather(
-            *(fetch_vpn_node_from_source(session, s) for s in all_sources),
+            *(fetch_vpn_source(session, s) for s in VPN_NODE_SOURCES),
             return_exceptions=True,
         )
     nodes: List[str] = []
@@ -772,7 +698,8 @@ async def collect_vpn_nodes(dynamic_sources: List[Dict]) -> List[str]:
     print(f"\n✅ Собрано уникальных VPN-нод: {len(nodes)}")
     return nodes
 
-async def check_vpn_node(semaphore: asyncio.Semaphore, node: str) -> Optional[Dict]:
+
+async def check_vpn_node(semaphore: asyncio.Semaphore, node: str) -> Dict | None:
     endpoint = parse_node_endpoint(node)
     if not endpoint:
         return None
@@ -795,8 +722,9 @@ async def check_vpn_node(semaphore: asyncio.Semaphore, node: str) -> Optional[Di
             pass
     return None
 
+
 async def check_all_vpn_nodes(nodes: List[str]) -> List[Dict]:
-    print(f"\n🔌 Проверяем {len(nodes)} VPN-нод TCP-connect (параллельно {VPN_CONCURRENT_CHECKS})...")
+    print(f"\n🔌 Проверяем {len(nodes)} VPN-нод TCP-connect (параллельно {VPN_CONCURRENT_CHECKS})....")
     if not nodes:
         return []
     semaphore = asyncio.Semaphore(VPN_CONCURRENT_CHECKS)
@@ -815,7 +743,8 @@ async def check_all_vpn_nodes(nodes: List[str]) -> List[Dict]:
     print(f"\n🟢 Живых TCP-доступных VPN-нод: {len(alive)}")
     return alive
 
-async def collect_proxies() -> List[Dict]:
+
+async def collect_all() -> List[Dict]:
     print("\n📡 Загружаем источники HTTP/SOCKS-прокси...")
     connector = aiohttp.TCPConnector(limit=40, ssl=False)
     async with aiohttp.ClientSession(connector=connector) as session:
@@ -836,9 +765,10 @@ async def collect_proxies() -> List[Dict]:
     print(f"\n✅ Собрано уникальных прокси: {len(unique)}")
     return unique
 
+
 async def check_proxy(semaphore: asyncio.Semaphore,
                       session: aiohttp.ClientSession,
-                      proxy: Dict) -> Optional[Dict]:
+                      proxy: Dict) -> Dict | None:
     ip, port, proto = proxy["ip"], proxy["port"], proxy.get("proto", "http")
     proxy_url = f"http://{ip}:{port}"
     async with semaphore:
@@ -860,7 +790,8 @@ async def check_proxy(semaphore: asyncio.Semaphore,
             pass
     return None
 
-async def check_all_proxies(proxies: List[Dict]) -> List[Dict]:
+
+async def check_all(proxies: List[Dict]) -> List[Dict]:
     http_proxies = [p for p in proxies if p.get("proto", "http") in ("http", "https")]
     print(f"\n🔍 Проверяем {len(http_proxies)} HTTP/HTTPS-прокси из {len(proxies)} собранных (параллельно {MAX_CONCURRENT_CHECKS})...")
     if not http_proxies:
@@ -883,6 +814,7 @@ async def check_all_proxies(proxies: List[Dict]) -> List[Dict]:
     print(f"\n🟢 Живых HTTP/HTTPS-прокси: {len(alive)}")
     return alive
 
+
 async def enrich_countries(session: aiohttp.ClientSession, proxies: List[Dict]) -> List[Dict]:
     need = [p for p in proxies if not p.get("country")]
     if not need:
@@ -904,48 +836,24 @@ async def enrich_countries(session: aiohttp.ClientSession, proxies: List[Dict]) 
             pass
     return proxies
 
-# ---------- ИСПРАВЛЕННЫЙ УНИВЕРСАЛЬНЫЙ УЗЕЛ (выбирает самую быструю ноду) ----------
-def make_universal_node(alive_vpn_nodes: List[Dict]) -> Optional[str]:
-    """
-    Создаёт универсальную ноду: самую быструю живую ноду.
-    Приоритет отдаётся ParadoxVPN (если есть хотя бы одна живая нода из ParadoxVPN).
-    """
-    if not alive_vpn_nodes:
-        return None
-    # Сначала ищем среди живых нод те, у которых в URI есть "paradox" (без учёта регистра)
-    paradox_alive = [n for n in alive_vpn_nodes if "paradox" in n.get("uri", "").lower()]
-    if paradox_alive:
-        best = min(paradox_alive, key=lambda x: x["ping"])
-    else:
-        best = min(alive_vpn_nodes, key=lambda x: x["ping"])
-    uri = best["uri"]
-    ping = best["ping"]
-    label = f"🌐 Универсальный (авто выбор) — {ping}ms"
-    labeled = set_node_label(uri, label)
-    return labeled if labeled else uri
 
-# ---------- ИСПРАВЛЕННАЯ ГЕНЕРАЦИЯ КОНФИГА (200 ГБ, сброс 1-го числа) ----------
-def next_month_timestamp() -> int:
-    """Unix-время начала следующего месяца (сброс трафика)."""
-    now = datetime.now(timezone.utc)
-    if now.month == 12:
-        next_month = datetime(now.year + 1, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    else:
-        next_month = datetime(now.year, now.month + 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    return int(next_month.timestamp())
+# ──────────────────────────────────────────────
+# ГЕНЕРАЦИЯ КОНФИГА
+# ──────────────────────────────────────────────
 
-def build_config(proxies: List[Dict], vpn_nodes: List[str] = None, top_n: int = MAX_PROXIES_IN_CONFIG) -> str:
+def build_config(proxies: List[Dict], vpn_nodes: List[str] | None = None,
+                 top_n: int = MAX_PROXIES_IN_CONFIG) -> str:
     vpn_nodes = vpn_nodes or []
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    total_bytes = 200 * 1024 ** 3   # 200 ГБ
-    expire_ts = next_month_timestamp()
+    # КЛЮЧЕВЫЕ заголовки для автообновления в Happ / V2RayTun / Hiddify / NekoBox
+    # profile-update-interval — интервал в ЧАСАХ
     lines = [
         "#profile-title: base64:" + base64.b64encode("🎮 FunVPN".encode()).decode(),
         "#profile-update-interval: 6",
-        f"#subscription-userinfo: upload=0; download=0; total={total_bytes}; expire={expire_ts}",
+        "#subscription-userinfo: upload=0; download=107374182400; total=214748364800; expire=253402300799",
         "#support-url: https://github.com/FunVPN",
         "#profile-web-page-url: https://github.com/FunVPN",
-        f"#announce: FunVPN — обновлено {now}. 200 ГБ/мес, сброс 1-го числа.",
+        f"#announce: FunVPN — обновлено {now}. VLESS/Trojan/VMess для Happ/V2RayTun/Hiddify.",
         "",
         "# ═══════════════════════════════════════════════════",
         "# 🛡️  РЕЗЕРВНЫЕ НОДЫ FunVPN (Cloudflare, всегда живые)",
@@ -960,20 +868,11 @@ def build_config(proxies: List[Dict], vpn_nodes: List[str] = None, top_n: int = 
         lines.append("# ═══════════════════════════════════════════════════")
         lines.append("# 🌐  VPN-НОДЫ (проверены TCP-connect, по пингу)")
         lines.append("# ═══════════════════════════════════════════════════")
-        # Универсальный узел (самая быстрая нода) – уже не случайный
-        # Но make_universal_node требует alive_vpn_nodes, а здесь у нас уже relabeled строки.
-        # Поэтому просто берём первую строку (она самая быстрая, потому что relabel_vpn_nodes сортирует по пингу)
-        fastest = vpn_nodes[0]
-        # извлекаем пинг из метки для красоты
-        import re
-        ping_match = re.search(r"\((\d+)ms\)", fastest)
-        ping_str = f" — {ping_match.group(1)}ms" if ping_match else ""
-        universal_label = f"🌐 Универсальный (авто выбор){ping_str}"
-        universal_node = set_node_label(fastest, universal_label)
-        lines.append(universal_node if universal_node else fastest)
-        node_count += 1
-        # остальные ноды
-        for node in vpn_nodes[1:MAX_VPN_NODES_IN_CONFIG]:
+        universal_node = make_universal_node(vpn_nodes)
+        if universal_node:
+            lines.append(universal_node)
+            node_count += 1
+        for node in vpn_nodes[:MAX_VPN_NODES_IN_CONFIG]:
             lines.append(node)
             node_count += 1
         lines.append("")
@@ -1003,14 +902,13 @@ def build_config(proxies: List[Dict], vpn_nodes: List[str] = None, top_n: int = 
     ]
     return "\n".join(lines)
 
-def build_json_report(proxies: List[Dict], vpn_nodes: List[str] = None) -> str:
+
+def build_json_report(proxies: List[Dict], vpn_nodes: List[str] | None = None) -> str:
     now = datetime.now(timezone.utc).isoformat()
     vpn_nodes = vpn_nodes or []
-    # универсальный узел в JSON можно не менять, но для информации возьмём первую строку
-    universal = vpn_nodes[0] if vpn_nodes else None
     return json.dumps({
         "updated_at": now,
-        "universal_node": universal,
+        "universal_node": make_universal_node(vpn_nodes),
         "vpn_nodes_total": len(vpn_nodes),
         "vpn_nodes_in_config": min(len(vpn_nodes), MAX_VPN_NODES_IN_CONFIG),
         "reserve_nodes": len(RESERVE_STATIC_NODES),
@@ -1019,71 +917,83 @@ def build_json_report(proxies: List[Dict], vpn_nodes: List[str] = None) -> str:
         "vpn_nodes": vpn_nodes[:MAX_VPN_NODES_IN_CONFIG],
         "proxies": proxies[:MAX_PROXIES_IN_CONFIG],
         "proxy_sources": len(SOURCES),
-        "vpn_node_sources": len(VPN_NODE_SOURCES) + 1,  # +1 за динамические
+        "vpn_node_sources": len(VPN_NODE_SOURCES),
         "credits": "FunVPN — FUN RUSSIA CRMP | TOO Oink Tech Ltd Co",
     }, ensure_ascii=False, indent=2)
+
 
 def build_log(collected: int, alive: int, vpn_nodes: int, elapsed: float) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     return (
-        f"=== FunVPN Proxy Robot v3.0 (Self-Healing) — {now} ===\n"
+        f"=== FunVPN Proxy Robot v3.0 — {now} ===\n"
         f"VPN-нод собрано:       {vpn_nodes}\n"
         f"VPN-нод в конфиге:     {min(vpn_nodes, MAX_VPN_NODES_IN_CONFIG)}\n"
         f"Резервных нод:         {len(RESERVE_STATIC_NODES)}\n"
         f"Прокси собрано:        {collected}\n"
         f"HTTP живых:            {alive}\n"
         f"HTTP в конфиге:        {min(alive, MAX_PROXIES_IN_CONFIG)}\n"
-        f"Источников VPN (статик): {len(VPN_NODE_SOURCES)}\n"
+        f"Источников VPN:        {len(VPN_NODE_SOURCES)}\n"
         f"Источников прокси:     {len(SOURCES)}\n"
         f"Время:                 {elapsed:.1f} сек\n"
         f"FUN RUSSIA CRMP | TOO Oink Tech Ltd Co\n"
     )
 
-# ---------- MAIN (обновлён) ----------
+
+# ──────────────────────────────────────────────
+# MAIN
+# ──────────────────────────────────────────────
+
 async def main():
     t_start = time.monotonic()
     print("=" * 55)
-    print("🤖  FunVPN Proxy/VPN Robot v3.0 (Self-Healing)")
+    print("🤖  FunVPN Proxy/VPN Robot v3.0")
     print("    FUN RUSSIA CRMP | TOO Oink Tech Ltd Co")
     print("=" * 55)
-    print(f"📋 Статических источников VPN: {len(VPN_NODE_SOURCES)}")
-    print(f"📋 Источников прокси: {len(SOURCES)}")
+    print(f"📋 Источников VPN: {len(VPN_NODE_SOURCES)}, прокси: {len(SOURCES)}")
     print(f"🛡️  Резервных статичных нод: {len(RESERVE_STATIC_NODES)}")
 
-    connector = aiohttp.TCPConnector(limit=50, ssl=False)
+    raw_vpn_nodes = await collect_vpn_nodes()
+    alive_vpn_nodes = await check_all_vpn_nodes(raw_vpn_nodes)
+    vpn_nodes = relabel_vpn_nodes(alive_vpn_nodes)
+
+    raw = await collect_all()
+    alive = await check_all(raw)
+
+    # Если совсем ничего нет — сохраняем только резервные ноды, не падаем
+    if not vpn_nodes and not alive:
+        print("\n⚠️  Живых нод не найдено. Сохраняем резервный конфиг.")
+        os.makedirs("configs", exist_ok=True)
+        with open(OUTPUT_CONFIG, "w", encoding="utf-8") as f:
+            f.write(build_config([], []))
+        elapsed = time.monotonic() - t_start
+        log_text = build_log(len(raw), 0, 0, elapsed)
+        with open(OUTPUT_LOG, "w", encoding="utf-8") as f:
+            f.write(log_text)
+        print(f"💾 Резервный конфиг сохранён: {OUTPUT_CONFIG}")
+        print(log_text)
+        return  # НЕ exit(1) — Actions не ломается
+
+    connector = aiohttp.TCPConnector(ssl=False)
     async with aiohttp.ClientSession(connector=connector) as session:
-        # 1. Сбор динамических источников (GitHub, Telegram)
-        dynamic_sources = await collect_dynamic_sources(session)
-        # 2. Сбор VPN-нод (статик + динамик)
-        raw_vpn_nodes = await collect_vpn_nodes(dynamic_sources)
-        # 3. Проверка нод
-        alive_vpn_nodes = await check_all_vpn_nodes(raw_vpn_nodes)
-        vpn_nodes = relabel_vpn_nodes(alive_vpn_nodes)
-
-        # 4. Прокси (без изменений)
-        raw_proxies = await collect_proxies()
-        alive_proxies = await check_all_proxies(raw_proxies)
-
-        # 5. Обогащение стран
-        alive_proxies = await enrich_countries(session, alive_proxies)
+        alive = await enrich_countries(session, alive)
 
     os.makedirs("configs", exist_ok=True)
 
-    config = build_config(alive_proxies, vpn_nodes)
     with open(OUTPUT_CONFIG, "w", encoding="utf-8") as f:
-        f.write(config)
+        f.write(build_config(alive, vpn_nodes))
     print(f"\n💾 Конфиг сохранён: {OUTPUT_CONFIG}")
 
     with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
-        f.write(build_json_report(alive_proxies, vpn_nodes))
+        f.write(build_json_report(alive, vpn_nodes))
     print(f"💾 JSON отчёт: {OUTPUT_JSON}")
 
     elapsed = time.monotonic() - t_start
-    log_text = build_log(len(raw_proxies), len(alive_proxies), len(vpn_nodes), elapsed)
+    log_text = build_log(len(raw), len(alive), len(vpn_nodes), elapsed)
     with open(OUTPUT_LOG, "w", encoding="utf-8") as f:
         f.write(log_text)
     print("\n" + log_text)
     print(f"✅ Готово за {elapsed:.1f} сек.")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
